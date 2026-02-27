@@ -233,6 +233,12 @@ usage_cache_stale() {
 }
 
 if usage_cache_stale; then
+  # Recuperer le cout precedent du cache pour fallback
+  PREV_WEEK_COST="0"
+  if [ -f "$USAGE_CACHE" ]; then
+    PREV_WEEK_COST=$(awk -F'|' '{print $NF}' "$USAGE_CACHE" 2>/dev/null) || PREV_WEEK_COST="0"
+  fi
+
   # Lire le token OAuth
   OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
   API_RESP=""
@@ -301,9 +307,19 @@ if usage_cache_stale; then
       WEEK_COST="0"
     fi
 
+    # Si le calcul JSONL echoue (0), garder le cout precedent du cache
+    if [ "${WEEK_COST:-0}" = "0" ] && [ "$PREV_WEEK_COST" != "0" ] && [ -n "$PREV_WEEK_COST" ]; then
+      WEEK_COST="$PREV_WEEK_COST"
+    fi
+
     USAGE_DATA="${USAGE_DATA}|${WEEK_COST}"
   else
-    USAGE_DATA="0||0|||0"
+    # API echouee : garder le cache precedent integralement
+    if [ -f "$USAGE_CACHE" ]; then
+      USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0"
+    else
+      USAGE_DATA="0||0|||0"
+    fi
   fi
 
   echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
