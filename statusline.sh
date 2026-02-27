@@ -316,12 +316,14 @@ if usage_cache_stale; then
             .input as $in | .output as $out |
             .cache_5m as $c5 | .cache_1h as $c1 |
             .cache_read as $cr | .total_in as $ti |
-            (if .speed == "fast" then 6 else 1 end) as $fm |
             if (.model // "" | test("opus-4-[56]")) then
-              if $ti > 200000 then
-                ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) * $fm / 1000000
+              if .speed == "fast" then
+                # Fast mode : x6 sur prix standard, couvre tout le contexte 1M
+                ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
+              elif $ti > 200000 then
+                ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
               else
-                ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) * $fm / 1000000
+                ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
               end
             elif (.model // "" | test("opus")) then
               ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
