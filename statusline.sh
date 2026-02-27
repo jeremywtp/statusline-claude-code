@@ -36,7 +36,7 @@ SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
 MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0
-LINES_ADD=0; LINES_REM=0; CTX_PCT=0; CTX_INPUT=0; CTX_OUTPUT=0
+LINES_ADD=0; LINES_REM=0; CTX_PCT=0; CTX_WIN_SIZE=0
 EXCEEDS_200K=false; AGENT_NAME=""; VIM_MODE=""
 
 _JQ_OUT=$(echo "$INPUT" | jq -r '
@@ -48,8 +48,7 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "LINES_ADD=\(.cost.total_lines_added // 0)",
   @sh "LINES_REM=\(.cost.total_lines_removed // 0)",
   @sh "CTX_PCT=\(.context_window.used_percentage // 0)",
-  @sh "CTX_INPUT=\(.context_window.total_input_tokens // 0)",
-  @sh "CTX_OUTPUT=\(.context_window.total_output_tokens // 0)",
+  @sh "CTX_WIN_SIZE=\(.context_window.context_window_size // 0)",
   @sh "EXCEEDS_200K=\(.exceeds_200k_tokens // false)",
   @sh "AGENT_NAME=\(.agent.name // "")",
   @sh "VIM_MODE=\(.vim.mode // "")"
@@ -70,19 +69,6 @@ case "$MODEL_NAME" in
   *Haiku*|*haiku*)   MC="$CYAN" ;;
   *)                 MC="$WHITE" ;;
 esac
-
-# --- Formatage tokens lisible (1.2k, 45.3k, 1.2M) ---
-format_tokens() {
-  local n=${1:-0}
-  n=${n%.*}  # Tronquer si float
-  if [ "$n" -ge 1000000 ] 2>/dev/null; then
-    printf '%.1fM' "$(echo "$n / 1000000" | bc -l 2>/dev/null)" || printf '%dM' "$((n / 1000000))"
-  elif [ "$n" -ge 1000 ] 2>/dev/null; then
-    printf '%.1fk' "$(echo "$n / 1000" | bc -l 2>/dev/null)" || printf '%dk' "$((n / 1000))"
-  else
-    printf '%d' "$n" 2>/dev/null || printf '0'
-  fi
-}
 
 # ============================================================================
 # GIT : cache par repertoire avec TTL de 5 secondes
@@ -135,6 +121,18 @@ fi
 # ============================================================================
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
+# Indicateur 1M context
+CTX_WIN_SIZE_INT=${CTX_WIN_SIZE%.*}
+if [ "${CTX_WIN_SIZE_INT:-0}" -gt 200000 ] 2>/dev/null; then
+  LINE1="${LINE1} $(printf '%b' "${BYELLOW}1M${RST}")"
+fi
+
+# Indicateur Fast mode (depuis settings.json)
+FAST_MODE=$(jq -r '.fastMode // false' "$HOME/.claude/settings.json" 2>/dev/null) || FAST_MODE="false"
+if [ "$FAST_MODE" = "true" ]; then
+  LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
+fi
+
 # Agent (si present)
 [ -n "$AGENT_NAME" ] && LINE1="${LINE1} $(printf '%b' "${DIM}${GRAY}")@${AGENT_NAME}$(printf '%b' "${RST}")"
 
@@ -156,7 +154,7 @@ LINE1="${LINE1}${GIT_SEGMENT}"
 LINE1="${LINE1}$(printf '%b' "${SEP}${DIM}${GRAY}")v${VERSION}$(printf '%b' "${RST}")"
 
 # ============================================================================
-# LIGNE 2 : Barre contexte | Session cout + tokens | Lignes | Duree
+# LIGNE 2 : Barre contexte | Session cout | Lignes | Duree
 # ============================================================================
 
 # --- Barre de progression ---
@@ -187,12 +185,9 @@ WARN_200K=""
 
 BAR_SEGMENT="$(printf '%b' "${BAR_COLOR}")${BAR_FILLED}$(printf '%b' "${DIM}${GRAY}")${BAR_EMPTY}$(printf '%b' "${RST}") ${PCT_LABEL}${WARN_200K}"
 
-# --- Session : cout + tokens ---
+# --- Session : cout ---
 COST_FMT=$(printf '$%.2f' "$COST" 2>/dev/null) || COST_FMT='$0.00'
-CTX_INPUT=${CTX_INPUT%.*}; CTX_OUTPUT=${CTX_OUTPUT%.*}
-TOTAL_TOK=$((CTX_INPUT + CTX_OUTPUT))
-TOK_FMT=$(format_tokens "$TOTAL_TOK")
-SESSION_SEGMENT="$(printf '%b' "${YELLOW}")${COST_FMT}$(printf '%b' "${RST}") $(printf '%b' "${DIM}${GRAY}")${TOK_FMT}$(printf '%b' "${RST}")"
+SESSION_SEGMENT="$(printf '%b' "${YELLOW}")${COST_FMT}$(printf '%b' "${RST}")"
 
 # --- Lignes ajoutees/supprimees ---
 if [ "$LINES_ADD" -gt 0 ] 2>/dev/null || [ "$LINES_REM" -gt 0 ] 2>/dev/null; then
@@ -263,11 +258,34 @@ if usage_cache_stale; then
       ] | join("|")
     ' 2>/dev/null) || USAGE_DATA="0||0||"
 
-    # Cout hebdo : calculer le debut de la fenetre 7j depuis resets_at
-    WEEK_START=""
+    # Cout hebdo : aligne sur la session semaine Anthropic
+    # On persiste le WEEK_START pour eviter que les fluctuations de resets_at
+    # (API rolling) ne decalent la fenetre. On ne recalcule que quand la
+    # session expire reellement (now >= stored resets_at).
+    WEEK_SESSION_FILE="$HOME/.claude/week-session"
     RESET_7D_RAW=$(echo "$API_RESP" | jq -r '.seven_day.resets_at // ""' 2>/dev/null)
+    WEEK_START=""
+
     if [ -n "$RESET_7D_RAW" ]; then
-      WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+      NOW_EPOCH=$(date +%s)
+
+      if [ -f "$WEEK_SESSION_FILE" ]; then
+        IFS='|' read -r STORED_RESET STORED_WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
+        STORED_RESET_EPOCH=$(date -d "$STORED_RESET" +%s 2>/dev/null || echo 0)
+
+        if [ "$NOW_EPOCH" -ge "$STORED_RESET_EPOCH" ] || [ "$STORED_RESET_EPOCH" = "0" ]; then
+          # Session expiree : nouvelle fenetre
+          WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+          echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
+        else
+          # Meme session : garder le start stocke
+          WEEK_START="$STORED_WEEK_START"
+        fi
+      else
+        # Premier lancement : calculer et stocker
+        WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+        echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
+      fi
     fi
 
     if [ -n "$WEEK_START" ]; then
@@ -276,26 +294,43 @@ if usage_cache_stale; then
       find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 2>/dev/null -exec \
         jq -c --arg tw "$WEEK_START" \
           'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
+           (.message.usage.input_tokens // 0) as $in |
+           (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0) as $c5 |
+           (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) as $c1 |
+           (.message.usage.cache_read_input_tokens // 0) as $cr |
            {reqId: .requestId, model: .message.model,
-            input: (.message.usage.input_tokens // 0),
-            output: (.message.usage.output_tokens // 0),
-            cache_write: (.message.usage.cache_creation_input_tokens // 0),
-            cache_read: (.message.usage.cache_read_input_tokens // 0)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
+            speed: (.message.usage.speed // "standard"),
+            input: $in, output: (.message.usage.output_tokens // 0),
+            cache_5m: $c5, cache_1h: $c1, cache_read: $cr,
+            total_in: ($in + $c5 + $c1 + $cr)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
 
       if [ -s "$WEEK_TMP" ]; then
+        # Prix officiels Anthropic (USD / MTok) — fevrier 2026
+        # https://platform.claude.com/docs/en/about-claude/pricing
+        # Cache 5min = 1.25x base input, Cache 1h = 2x base input, Cache read = 0.1x base input
+        # Long context (>200K input) : prix input x2, output x1.5 (Opus/Sonnet uniquement)
+        # Fast mode (Opus 4.6 only) : x6 sur tous les prix
         WEEK_COST=$(jq -sc '
           group_by(.reqId) | map(last) |
-          group_by(.model) | map(
-            (map(.input) | add) as $in |
-            (map(.output) | add) as $out |
-            (map(.cache_write) | add) as $cw |
-            (map(.cache_read) | add) as $cr |
-            if (.[0].model // "" | test("opus")) then
-              ($in * 15 + $out * 75 + $cw * 18.75 + $cr * 1.5) / 1000000
-            elif (.[0].model // "" | test("haiku")) then
-              ($in * 0.8 + $out * 4 + $cw * 1 + $cr * 0.08) / 1000000
+          map(
+            .input as $in | .output as $out |
+            .cache_5m as $c5 | .cache_1h as $c1 |
+            .cache_read as $cr | .total_in as $ti |
+            (if .speed == "fast" then 6 else 1 end) as $fm |
+            if (.model // "" | test("opus-4-[56]")) then
+              if $ti > 200000 then
+                ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) * $fm / 1000000
+              else
+                ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) * $fm / 1000000
+              end
+            elif (.model // "" | test("opus")) then
+              ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
+            elif (.model // "" | test("haiku")) then
+              ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+            elif $ti > 200000 then
+              ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
             else
-              ($in * 3 + $out * 15 + $cw * 3.75 + $cr * 0.3) / 1000000
+              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
             end
           ) | add // 0
         ' "$WEEK_TMP" 2>/dev/null) || WEEK_COST="0"
