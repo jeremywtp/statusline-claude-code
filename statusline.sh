@@ -305,11 +305,14 @@ if usage_cache_stale; then
             total_in: ($in + $c5 + $c1 + $cr)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
 
       if [ -s "$WEEK_TMP" ]; then
-        # Prix officiels Anthropic (USD / MTok) — fevrier 2026
+        # Prix officiels Anthropic (USD / MTok) — mars 2026
         # https://platform.claude.com/docs/en/about-claude/pricing
+        # https://code.claude.com/docs/en/fast-mode
         # Cache 5min = 1.25x base input, Cache 1h = 2x base input, Cache read = 0.1x base input
         # Long context (>200K input) : prix input x2, output x1.5 (Opus/Sonnet uniquement)
-        # Fast mode (Opus 4.6 only) : x6 sur tous les prix
+        # Fast mode (Opus 4.6 only) : x6 sur prix standard, facture en extra usage (API)
+        #   <200K : $30 input, $150 output
+        #   >200K : $60 input, $225 output (long context x2/x1.5 applique sur fast)
         WEEK_COST=$(jq -sc '
           group_by(.reqId) | map(last) |
           map(
@@ -317,8 +320,11 @@ if usage_cache_stale; then
             .cache_5m as $c5 | .cache_1h as $c1 |
             .cache_read as $cr | .total_in as $ti |
             if (.model // "" | test("opus-4-[56]")) then
-              if .speed == "fast" then
-                # Fast mode : x6 sur prix standard, couvre tout le contexte 1M
+              if .speed == "fast" and $ti > 200000 then
+                # Fast mode + long context >200K : $60/$225 + cache sur base $60
+                ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
+              elif .speed == "fast" then
+                # Fast mode <200K : $30/$150 + cache sur base $30
                 ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
               elif $ti > 200000 then
                 ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
