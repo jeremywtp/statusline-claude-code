@@ -133,6 +133,14 @@ if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
 
+# Indicateur Effort level (depuis settings.json)
+EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$HOME/.claude/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
+case "$EFFORT_LEVEL" in
+  low)     LINE1="${LINE1} $(printf '%b' "${DIM}${CYAN}Lo${RST}")" ;;
+  medium)  LINE1="${LINE1} $(printf '%b' "${BYELLOW}Med${RST}")" ;;
+  high)    LINE1="${LINE1} $(printf '%b' "${BRED}Hi${RST}")" ;;
+esac
+
 # Agent (si present)
 [ -n "$AGENT_NAME" ] && LINE1="${LINE1} $(printf '%b' "${DIM}${GRAY}")@${AGENT_NAME}$(printf '%b' "${RST}")"
 
