@@ -133,14 +133,6 @@ if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
 
-# Indicateur Effort level (depuis settings.json) — style barres verticales
-EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$HOME/.claude/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
-BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
-case "$EFFORT_LEVEL" in
-  low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-  medium)  LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
-  high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-esac
 
 # Agent (si present)
 [ -n "$AGENT_NAME" ] && LINE1="${LINE1} $(printf '%b' "${DIM}${GRAY}")@${AGENT_NAME}$(printf '%b' "${RST}")"

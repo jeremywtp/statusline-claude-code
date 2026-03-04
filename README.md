@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Claude Opus 4.6 1M ⚡ ▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.62
+Claude Opus 4.6 1M ⚡ │ my-project │ * main +2 ~1 ?3 │ v2.1.62
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% $142.50 5j 8h
 ```
@@ -16,7 +16,6 @@ Claude Opus 4.6 1M ⚡ ▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.62
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **1M** (jaune) si le contexte est > 200K tokens
 - Indicateur **⚡** (jaune) si le fast mode est actif (`fastMode` dans `settings.json`)
-- Indicateur **effort level** en barres verticales : `▌░░` low (cyan), `▌▌░` medium (jaune), `▌▌▌` high (rouge) — lit `effortLevel` dans `settings.json`
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
@@ -105,7 +104,7 @@ chmod +x ~/.claude/statusline.sh
 | Fichier | Description | TTL |
 |---|---|---|
 | `~/.claude/statusline.sh` | Script principal | — |
-| `~/.claude/settings.json` | Config Claude Code (fastMode, effortLevel, statusLine) | — |
+| `~/.claude/settings.json` | Config Claude Code (fastMode, statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + cout hebdo) | 60s |
 | `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
