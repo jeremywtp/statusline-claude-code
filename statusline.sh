@@ -225,20 +225,51 @@ LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${S
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
 # Source : /api/oauth/usage — donnees officielles du plan Max20
-# Cache dans /tmp avec TTL de 60 secondes
+# Cache event-driven + verrou anti-concurrence
+# Refresh si : activite detectee (cout change) + 30s min, ou fallback 600s
 # ============================================================================
 USAGE_CACHE="/tmp/claude-sl-usage-cache"
-USAGE_CACHE_TTL=60
+USAGE_COST_STATE="/tmp/claude-sl-last-cost"
+USAGE_LOCK="/tmp/claude-sl-usage-lock"
+USAGE_MIN_INTERVAL=30
+USAGE_MAX_INTERVAL=600
 
 usage_cache_stale() {
   [ ! -f "$USAGE_CACHE" ] && return 0
-  local now file_age
+  local now cache_age last_cost
   now=$(date +%s)
-  file_age=$(stat -c %Y "$USAGE_CACHE" 2>/dev/null || echo 0)
-  [ $((now - file_age)) -gt "$USAGE_CACHE_TTL" ]
+  cache_age=$(( now - $(stat -c %Y "$USAGE_CACHE" 2>/dev/null || echo 0) ))
+
+  # Fallback : toujours rafraichir apres 600s
+  [ "$cache_age" -gt "$USAGE_MAX_INTERVAL" ] && return 0
+
+  # Minimum 30s entre deux appels
+  [ "$cache_age" -lt "$USAGE_MIN_INTERVAL" ] && return 1
+
+  # Activite detectee : le cout de session a change
+  last_cost=$(cat "$USAGE_COST_STATE" 2>/dev/null) || last_cost=""
+  [ "$COST" != "$last_cost" ]
 }
 
-if usage_cache_stale; then
+# Verrou atomique : empeche les appels API concurrents entre sessions
+acquire_usage_lock() {
+  if mkdir "$USAGE_LOCK" 2>/dev/null; then
+    trap 'rmdir "$USAGE_LOCK" 2>/dev/null' EXIT
+    return 0
+  fi
+  # Verrou existant : le casser s'il a plus de 30 secondes (crash)
+  local lock_age
+  lock_age=$(stat -c %Y "$USAGE_LOCK" 2>/dev/null || echo 0)
+  if [ $(($(date +%s) - lock_age)) -gt 30 ]; then
+    rmdir "$USAGE_LOCK" 2>/dev/null
+    mkdir "$USAGE_LOCK" 2>/dev/null || return 1
+    trap 'rmdir "$USAGE_LOCK" 2>/dev/null' EXIT
+    return 0
+  fi
+  return 1
+}
+
+if usage_cache_stale && acquire_usage_lock; then
   # Recuperer le cout precedent du cache pour fallback
   PREV_WEEK_COST="0"
   if [ -f "$USAGE_CACHE" ]; then
@@ -377,6 +408,8 @@ if usage_cache_stale; then
   fi
 
   echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
+  echo "$COST" > "$USAGE_COST_STATE" 2>/dev/null || true
+  rmdir "$USAGE_LOCK" 2>/dev/null
 else
   USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0"
 fi
