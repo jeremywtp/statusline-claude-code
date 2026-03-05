@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.62
+Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.62 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% $142.50 5j 8h
 ```
@@ -22,6 +22,7 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.62
 - Nom du projet courant
 - Branche git avec fichiers staged (`+`), modifies (`~`), et untracked (`?`)
 - Version de Claude Code
+- Indicateur **status Claude** : `●` vert (OK), orange (degrade), rouge (incident) — via [status.claude.com](https://status.claude.com)
 
 **Ligne 2 — Contexte & Session**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
@@ -109,6 +110,7 @@ chmod +x ~/.claude/statusline.sh
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + cout hebdo) | 60s |
 | `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
+| `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
 
 ## Fonctionnement
 

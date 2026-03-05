@@ -164,6 +164,31 @@ LINE1="${LINE1}${GIT_SEGMENT}"
 # Version
 LINE1="${LINE1}$(printf '%b' "${SEP}${DIM}${GRAY}")v${VERSION}$(printf '%b' "${RST}")"
 
+# Status Claude (status.claude.com — cache 60s)
+STATUS_CACHE="/tmp/claude-sl-status-cache"
+STATUS_CACHE_TTL=60
+
+_status_stale() {
+  [ ! -f "$STATUS_CACHE" ] && return 0
+  [ $(($(date +%s) - $(stat -c %Y "$STATUS_CACHE" 2>/dev/null || echo 0))) -gt "$STATUS_CACHE_TTL" ]
+}
+
+if _status_stale; then
+  _STATUS_JSON=$(curl -sf --max-time 3 "https://status.claude.com/api/v2/status.json" 2>/dev/null) || _STATUS_JSON=""
+  if [ -n "$_STATUS_JSON" ]; then
+    echo "$_STATUS_JSON" | jq -r '.status.indicator // "none"' > "$STATUS_CACHE" 2>/dev/null || true
+  fi
+fi
+
+STATUS_IND=$(cat "$STATUS_CACHE" 2>/dev/null) || STATUS_IND="none"
+DOT="\xe2\x97\x8f"  # ●
+case "$STATUS_IND" in
+  none)     LINE1="${LINE1} $(printf '%b' "${BGREEN}${DOT}${RST}")" ;;
+  minor)    LINE1="${LINE1} $(printf '%b' "${BYELLOW}${DOT}${RST}")" ;;
+  major)    LINE1="${LINE1} $(printf '%b' "${BRED}${DOT}${RST}")" ;;
+  critical) LINE1="${LINE1} $(printf '%b' "${BRED}${BOLD}${DOT}${RST}")" ;;
+esac
+
 # ============================================================================
 # LIGNE 2 : Barre contexte | Session cout | Lignes | Duree
 # ============================================================================
