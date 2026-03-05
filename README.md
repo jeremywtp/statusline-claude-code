@@ -6,7 +6,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ```
 Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 ●
-██████░░░░░░░░░ 40% │ $1.24 (Σ$1,501) │ +45 -12 │ 3m 22s
+██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ Σ$1501
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 

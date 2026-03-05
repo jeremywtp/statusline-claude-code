@@ -295,21 +295,15 @@ fi
 
 # Formatage du cout total
 if [ -n "$TOTAL_COST_VAL" ] && [ "$TOTAL_COST_VAL" != "0" ]; then
-  # Formater avec separateur milliers si >= 1000
   TOTAL_INT=$(printf '%.0f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_INT=0
-  if [ "$TOTAL_INT" -ge 1000 ] 2>/dev/null; then
-    TOTAL_COST_FMT=$(printf '%s' "$TOTAL_INT" | sed ':a;s/\B[0-9]\{3\}\>/,&/;ta')
-    TOTAL_COST_FMT="\$${TOTAL_COST_FMT}"
-  else
-    TOTAL_COST_FMT=$(printf '$%.2f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_COST_FMT='$0'
-  fi
-  TOTAL_COST_SEGMENT=" $(printf '%b' "${DIM}${CYAN}")($(printf '%b' "\xce\xa3")${TOTAL_COST_FMT})$(printf '%b' "${RST}")"
+  TOTAL_COST_FMT="\$${TOTAL_INT}"
+  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${CYAN}\xce\xa3")${TOTAL_COST_FMT}$(printf '%b' "${RST}")"
 else
-  TOTAL_COST_SEGMENT=" $(printf '%b' "${DIM}${GRAY}")($(printf '%b' "\xce\xa3")...)$(printf '%b' "${RST}")"
+  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${GRAY}\xce\xa3")...$(printf '%b' "${RST}")"
 fi
 
 # Assemblage ligne 2
-LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}${TOTAL_COST_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}"
+LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}$(printf '%b' "${SEP}")${TOTAL_COST_SEGMENT}"
 
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
