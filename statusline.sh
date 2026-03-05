@@ -297,9 +297,9 @@ fi
 if [ -n "$TOTAL_COST_VAL" ] && [ "$TOTAL_COST_VAL" != "0" ]; then
   TOTAL_INT=$(printf '%.0f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_INT=0
   TOTAL_COST_FMT="\$${TOTAL_INT}"
-  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${CYAN}\xce\xa3")${TOTAL_COST_FMT}$(printf '%b' "${RST}")"
+  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${CYAN}\xce\xa3") ${TOTAL_COST_FMT}$(printf '%b' "${RST}")"
 else
-  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${GRAY}\xce\xa3")...$(printf '%b' "${RST}")"
+  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${GRAY}\xce\xa3") ...$(printf '%b' "${RST}")"
 fi
 
 # Assemblage ligne 2
