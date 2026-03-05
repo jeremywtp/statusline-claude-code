@@ -244,8 +244,72 @@ else
 fi
 DURATION_SEGMENT="$(printf '%b' "${GRAY}")${DURATION_FMT}$(printf '%b' "${RST}")"
 
+# ============================================================================
+# COUT TOTAL LIFETIME (background calc avec cache durable)
+# ============================================================================
+TOTAL_COST_CACHE="$HOME/.claude/total-cost-cache"
+TOTAL_COST_TTL=300
+
+TOTAL_COST_VAL=""
+if [ -f "$TOTAL_COST_CACHE" ]; then
+  IFS='|' read -r TOTAL_COST_VAL CACHED_BYTES CACHED_EPOCH < "$TOTAL_COST_CACHE" 2>/dev/null || true
+fi
+
+# Check rapide : taille totale des JSONL a change ?
+CURRENT_BYTES=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1}END{print s+0}')
+NOW_SEC=$(date +%s)
+CACHE_AGE=$(( NOW_SEC - ${CACHED_EPOCH:-0} ))
+
+if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOTAL_COST_TTL" ] || [ -z "$TOTAL_COST_VAL" ]; then
+  # Lancer le calcul en background (non-bloquant)
+  (
+    _TC=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f \
+      -exec grep -h '"output_tokens"' {} + 2>/dev/null | \
+      jq -c 'select(.type == "assistant" and .message.usage.output_tokens > 0) | [
+        .requestId, .message.usage.input_tokens, .message.usage.output_tokens,
+        (.message.usage.cache_creation_input_tokens // 0),
+        (.message.usage.cache_read_input_tokens // 0),
+        (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0),
+        (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0),
+        (if .message.usage.speed == "fast" then 6 else 1 end),
+        ((.message.usage.input_tokens // 0) + (.message.usage.cache_creation_input_tokens // 0) + (.message.usage.cache_read_input_tokens // 0))
+      ]' 2>/dev/null | jq -sc '
+        group_by(.[0]) | map(last) |
+        map(
+          .[7] as $m | .[8] as $ti |
+          if $ti > 200000 and $m == 6 then
+            (.[1]*60 + .[2]*225 + .[5]*75 + .[6]*120 + .[4]*6) / 1000000
+          elif $m == 6 then
+            (.[1]*30 + .[2]*150 + .[5]*37.5 + .[6]*60 + .[4]*3) / 1000000
+          elif $ti > 200000 then
+            (.[1]*10 + .[2]*37.5 + .[5]*12.5 + .[6]*20 + .[4]*1) / 1000000
+          else
+            (.[1]*5 + .[2]*25 + .[5]*6.25 + .[6]*10 + .[4]*0.5) / 1000000
+          end
+        ) | add // 0 | . * 100 | round / 100
+      ')
+    _TB=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1}END{print s+0}')
+    echo "${_TC:-0}|${_TB}|$(date +%s)" > "$TOTAL_COST_CACHE" 2>/dev/null
+  ) &
+fi
+
+# Formatage du cout total
+if [ -n "$TOTAL_COST_VAL" ] && [ "$TOTAL_COST_VAL" != "0" ]; then
+  # Formater avec separateur milliers si >= 1000
+  TOTAL_INT=$(printf '%.0f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_INT=0
+  if [ "$TOTAL_INT" -ge 1000 ] 2>/dev/null; then
+    TOTAL_COST_FMT=$(printf '%s' "$TOTAL_INT" | sed ':a;s/\B[0-9]\{3\}\>/,&/;ta')
+    TOTAL_COST_FMT="\$${TOTAL_COST_FMT}"
+  else
+    TOTAL_COST_FMT=$(printf '$%.2f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_COST_FMT='$0'
+  fi
+  TOTAL_COST_SEGMENT=" $(printf '%b' "${DIM}${CYAN}")($(printf '%b' "\xce\xa3")${TOTAL_COST_FMT})$(printf '%b' "${RST}")"
+else
+  TOTAL_COST_SEGMENT=" $(printf '%b' "${DIM}${GRAY}")($(printf '%b' "\xce\xa3")...)$(printf '%b' "${RST}")"
+fi
+
 # Assemblage ligne 2
-LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}"
+LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}${TOTAL_COST_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}"
 
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)

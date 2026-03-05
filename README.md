@@ -1,12 +1,12 @@
 # Claude Code Statusline
 
-Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
+Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, cout total lifetime, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
 
 ## Preview
 
 ```
 Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 ●
-██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s
+██████░░░░░░░░░ 40% │ $1.24 (Σ$1,501) │ +45 -12 │ 3m 22s
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -28,6 +28,7 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
 - Alerte `!` rouge si > 200K tokens
 - Cout de la session courante (USD)
+- **Cout total lifetime** `(Σ$X,XXX)` — cumul de toutes les sessions depuis le premier lancement (calcul background, cache durable)
 - Lignes ajoutees/supprimees
 - Duree de la session
 
@@ -38,9 +39,13 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 
 
 ## Calcul des couts
 
-Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
+Les couts (5h, hebdo et lifetime) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
+
+### Cout total lifetime
+
+Le cout total cumule toutes les sessions depuis le premier lancement de Claude Code. Le calcul est lance en **background** (~3s) pour ne jamais bloquer l'affichage. Le resultat est cache dans `~/.claude/total-cost-cache` et recalcule automatiquement quand la taille des fichiers JSONL change (TTL minimum 300s). Utilise `grep` comme pre-filtre rapide suivi de `jq` pour la deduplication et le pricing.
 
 ### Prix (USD / MTok) — Mars 2026
 
@@ -111,6 +116,7 @@ chmod +x ~/.claude/statusline.sh
 | `~/.claude/settings.json` | Config Claude Code (fastMode, effortLevel, statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
+| `~/.claude/total-cost-cache` | Cout total lifetime (`COST\|BYTES\|EPOCH`) — calcul background ~3s | 300s + detection changement |
 | `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j) | 120s |
 | `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
 | `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
