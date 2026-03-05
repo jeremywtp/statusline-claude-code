@@ -1,13 +1,13 @@
 # Claude Code Statusline
 
-Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j avec calcul de cout hebdo reel depuis les logs JSONL.
+Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
 
 ## Preview
 
 ```
-Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.62 ●
+Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s
-5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% $142.50 5j 8h
+5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
 ## Fonctionnalites
@@ -32,15 +32,17 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.62 
 - Duree de la session
 
 **Ligne 3 — Quotas d'utilisation**
-- Quota 5 heures : mini-barre + pourcentage + timer avant reset
-- Quota 7 jours : mini-barre + pourcentage + **cout hebdo reel** + timer avant reset
-- Donnees recuperees via l'API OAuth Anthropic (cache 60s)
+- Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
+- Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel**
+- Donnees recuperees via l'API OAuth Anthropic (cache 120s, persistance durable)
 
-## Calcul du cout hebdo
+## Calcul des couts
 
-Le cout hebdomadaire est calcule localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
+Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
 
-### Prix (USD / MTok) — Fevrier 2026
+Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
+
+### Prix (USD / MTok) — Mars 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
@@ -108,15 +110,26 @@ chmod +x ~/.claude/statusline.sh
 | `~/.claude/statusline.sh` | Script principal | — |
 | `~/.claude/settings.json` | Config Claude Code (fastMode, effortLevel, statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
-| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + cout hebdo) | 60s |
+| `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
+| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j) | 120s |
 | `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
 | `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
+
+## Resilience API
+
+L'API `/api/oauth/usage` est sujette a du rate limiting (429). Le script utilise une chaine de fallback a 3 niveaux pour ne jamais perdre les donnees :
+
+1. **API OK (200)** — met a jour le cache `/tmp` + le fichier durable `~/.claude/usage-session`
+2. **API 429 + cache existant** — garde les anciennes valeurs du cache
+3. **API 429 + cache vide** — lit le fichier durable (survit aux reboots et purges /tmp)
+
+Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
 
 ## Fonctionnement
 
 Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse avec `jq` pour extraire les infos du modele, du contexte, de la session et du git.
 
-Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Le cout hebdo est recalcule a chaque refresh du cache usage (60s) en scannant tous les fichiers JSONL du repertoire `~/.claude/projects/`.
+Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (120s) en scannant tous les fichiers JSONL du repertoire `~/.claude/projects/`.
 
 ## Licence
 

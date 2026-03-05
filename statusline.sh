@@ -253,7 +253,8 @@ LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${S
 # Cache dans /tmp avec TTL de 60 secondes
 # ============================================================================
 USAGE_CACHE="/tmp/claude-sl-usage-cache"
-USAGE_CACHE_TTL=60
+USAGE_CACHE_TTL=120
+USAGE_SESSION_FILE="$HOME/.claude/usage-session"
 
 usage_cache_stale() {
   [ ! -f "$USAGE_CACHE" ] && return 0
@@ -264,26 +265,44 @@ usage_cache_stale() {
 }
 
 if usage_cache_stale; then
-  # Recuperer le cout precedent du cache pour fallback
-  PREV_WEEK_COST="0"
+  # Recuperer le cache precedent pour fallback
+  PREV_USAGE=""; PREV_WEEK_COST="0"; PREV_BLOCK_COST="0"
   if [ -f "$USAGE_CACHE" ]; then
-    PREV_WEEK_COST=$(awk -F'|' '{print $NF}' "$USAGE_CACHE" 2>/dev/null) || PREV_WEEK_COST="0"
+    PREV_USAGE=$(cat "$USAGE_CACHE" 2>/dev/null) || PREV_USAGE=""
+    PREV_WEEK_COST=$(echo "$PREV_USAGE" | awk -F'|' '{print $6}') || PREV_WEEK_COST="0"
+    PREV_BLOCK_COST=$(echo "$PREV_USAGE" | awk -F'|' '{print $7}') || PREV_BLOCK_COST="0"
   fi
 
-  # Lire le token OAuth
+  # --- Appel API OAuth usage (avec retry sur 429) ---
   OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
   API_RESP=""
+  API_HTTP=0
 
-  if [ -n "$OAUTH_TOKEN" ]; then
-    API_RESP=$(curl -sf --max-time 5 \
+  _fetch_usage() {
+    local _tmp_file
+    _tmp_file=$(mktemp /tmp/claude-sl-api-XXXXXX)
+    API_HTTP=$(curl -s --max-time 5 -o "$_tmp_file" -w "%{http_code}" \
       -H "Accept: application/json" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $OAUTH_TOKEN" \
       -H "anthropic-beta: oauth-2025-04-20" \
-      "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || API_RESP=""
+      -H "User-Agent: claude-code/${VERSION}" \
+      "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || API_HTTP=0
+    API_RESP=$(cat "$_tmp_file" 2>/dev/null) || API_RESP=""
+    rm -f "$_tmp_file"
+  }
+
+  if [ -n "$OAUTH_TOKEN" ]; then
+    _fetch_usage
+    # Retry une fois sur 429
+    if [ "$API_HTTP" = "429" ]; then
+      sleep 2
+      _fetch_usage
+    fi
   fi
 
-  if [ -n "$API_RESP" ]; then
+  # Valider que la reponse contient bien les champs attendus
+  if [ "$API_HTTP" = "200" ] && echo "$API_RESP" | jq -e '.five_hour' > /dev/null 2>&1; then
     USAGE_DATA=$(echo "$API_RESP" | jq -r '
       [
         (.five_hour.utilization // 0 | tostring),
@@ -293,121 +312,185 @@ if usage_cache_stale; then
         ""
       ] | join("|")
     ' 2>/dev/null) || USAGE_DATA="0||0||"
+    # Persister dans le fichier durable (survit aux purges /tmp et reboots)
+    echo "$USAGE_DATA" > "$USAGE_SESSION_FILE" 2>/dev/null || true
+  else
+    # API echouee : chaine de fallback
+    # 1) Cache /tmp precedent
+    # 2) Fichier durable ~/.claude/usage-session
+    # 3) Zeros (premier lancement uniquement)
+    if [ -n "$PREV_USAGE" ]; then
+      USAGE_DATA=$(echo "$PREV_USAGE" | awk -F'|' '{OFS="|"; print $1,$2,$3,$4,""}') || USAGE_DATA="0||0||"
+    elif [ -f "$USAGE_SESSION_FILE" ]; then
+      USAGE_DATA=$(cat "$USAGE_SESSION_FILE" 2>/dev/null) || USAGE_DATA="0||0||"
+    else
+      USAGE_DATA="0||0||"
+    fi
+  fi
 
-    # Cout hebdo : aligne sur la session semaine Anthropic
-    # On persiste le WEEK_START pour eviter que les fluctuations de resets_at
-    # (API rolling) ne decalent la fenetre. On ne recalcule que quand la
-    # session expire reellement (now >= stored resets_at).
-    WEEK_SESSION_FILE="$HOME/.claude/week-session"
+  # --- Couts session : calcul independant (JSONL locaux, pas l'API) ---
+  WEEK_SESSION_FILE="$HOME/.claude/week-session"
+  RESET_7D_RAW=""
+  RESET_5H_RAW=""
+  WEEK_START=""
+
+  # Extraire resets_at de l'API si disponible, sinon du cache
+  if [ "$API_HTTP" = "200" ] && [ -n "$API_RESP" ]; then
     RESET_7D_RAW=$(echo "$API_RESP" | jq -r '.seven_day.resets_at // ""' 2>/dev/null)
-    WEEK_START=""
+    RESET_5H_RAW=$(echo "$API_RESP" | jq -r '.five_hour.resets_at // ""' 2>/dev/null)
+  fi
 
-    if [ -n "$RESET_7D_RAW" ]; then
-      NOW_EPOCH=$(date +%s)
+  # Fallback : utiliser le fichier week-session existant
+  if [ -z "$RESET_7D_RAW" ] && [ -f "$WEEK_SESSION_FILE" ]; then
+    IFS='|' read -r RESET_7D_RAW WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
+  fi
 
-      if [ -f "$WEEK_SESSION_FILE" ]; then
-        IFS='|' read -r STORED_RESET STORED_WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
-        STORED_RESET_EPOCH=$(date -d "$STORED_RESET" +%s 2>/dev/null || echo 0)
+  # Fallback 5h : cache precedent → fichier durable → approximation
+  if [ -z "$RESET_5H_RAW" ] && [ -n "$PREV_USAGE" ]; then
+    RESET_5H_RAW=$(echo "$PREV_USAGE" | awk -F'|' '{print $2}')
+  fi
+  if [ -z "$RESET_5H_RAW" ] && [ -f "$USAGE_SESSION_FILE" ]; then
+    RESET_5H_RAW=$(awk -F'|' '{print $2}' "$USAGE_SESSION_FILE" 2>/dev/null)
+  fi
 
-        if [ "$NOW_EPOCH" -ge "$STORED_RESET_EPOCH" ] || [ "$STORED_RESET_EPOCH" = "0" ]; then
-          # Session expiree : nouvelle fenetre
-          WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
-          echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
-        else
-          # Meme session : garder le start stocke
-          WEEK_START="$STORED_WEEK_START"
-        fi
-      else
-        # Premier lancement : calculer et stocker
+  if [ -n "$RESET_7D_RAW" ]; then
+    NOW_EPOCH=$(date +%s)
+
+    if [ -f "$WEEK_SESSION_FILE" ] && [ -z "$WEEK_START" ]; then
+      IFS='|' read -r STORED_RESET STORED_WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
+      STORED_RESET_EPOCH=$(date -d "$STORED_RESET" +%s 2>/dev/null || echo 0)
+
+      if [ "$NOW_EPOCH" -ge "$STORED_RESET_EPOCH" ] || [ "$STORED_RESET_EPOCH" = "0" ]; then
         WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
         echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
-      fi
-    fi
-
-    if [ -n "$WEEK_START" ]; then
-      # Fichier temporaire pour eviter les problemes de pipe avec find -exec
-      WEEK_TMP="/tmp/claude-sl-week-raw.jsonl"
-      find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 2>/dev/null -exec \
-        jq -c --arg tw "$WEEK_START" \
-          'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
-           (.message.usage.input_tokens // 0) as $in |
-           (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0) as $c5 |
-           (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) as $c1 |
-           (.message.usage.cache_read_input_tokens // 0) as $cr |
-           {reqId: .requestId, model: .message.model,
-            speed: (.message.usage.speed // "standard"),
-            input: $in, output: (.message.usage.output_tokens // 0),
-            cache_5m: $c5, cache_1h: $c1, cache_read: $cr,
-            total_in: ($in + $c5 + $c1 + $cr)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
-
-      if [ -s "$WEEK_TMP" ]; then
-        # Prix officiels Anthropic (USD / MTok) — mars 2026
-        # https://platform.claude.com/docs/en/about-claude/pricing
-        # https://code.claude.com/docs/en/fast-mode
-        # Cache 5min = 1.25x base input, Cache 1h = 2x base input, Cache read = 0.1x base input
-        # Long context (>200K input) : prix input x2, output x1.5 (Opus/Sonnet uniquement)
-        # Fast mode (Opus 4.6 only) : x6 sur prix standard, facture en extra usage (API)
-        #   <200K : $30 input, $150 output
-        #   >200K : $60 input, $225 output (long context x2/x1.5 applique sur fast)
-        WEEK_COST=$(jq -sc '
-          group_by(.reqId) | map(last) |
-          map(
-            .input as $in | .output as $out |
-            .cache_5m as $c5 | .cache_1h as $c1 |
-            .cache_read as $cr | .total_in as $ti |
-            if (.model // "" | test("opus-4-[56]")) then
-              if .speed == "fast" and $ti > 200000 then
-                # Fast mode + long context >200K : $60/$225 + cache sur base $60
-                ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
-              elif .speed == "fast" then
-                # Fast mode <200K : $30/$150 + cache sur base $30
-                ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
-              elif $ti > 200000 then
-                ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
-              else
-                ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
-              end
-            elif (.model // "" | test("opus")) then
-              ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
-            elif (.model // "" | test("haiku")) then
-              ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
-            elif $ti > 200000 then
-              ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
-            else
-              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
-            end
-          ) | add // 0
-        ' "$WEEK_TMP" 2>/dev/null) || WEEK_COST="0"
       else
-        WEEK_COST="0"
+        WEEK_START="$STORED_WEEK_START"
       fi
-      rm -f "$WEEK_TMP"
+    elif [ -z "$WEEK_START" ]; then
+      WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+      echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
+    fi
+  fi
+
+  if [ -n "$WEEK_START" ]; then
+    WEEK_TMP="/tmp/claude-sl-week-raw.jsonl"
+    find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 2>/dev/null -exec \
+      jq -c --arg tw "$WEEK_START" \
+        'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
+         (.message.usage.input_tokens // 0) as $in |
+         (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0) as $c5 |
+         (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) as $c1 |
+         (.message.usage.cache_read_input_tokens // 0) as $cr |
+         {ts: .timestamp, reqId: .requestId, model: .message.model,
+          speed: (.message.usage.speed // "standard"),
+          input: $in, output: (.message.usage.output_tokens // 0),
+          cache_5m: $c5, cache_1h: $c1, cache_read: $cr,
+          total_in: ($in + $c5 + $c1 + $cr)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
+
+    if [ -s "$WEEK_TMP" ]; then
+      # Prix officiels Anthropic (USD / MTok) — mars 2026
+      WEEK_COST=$(jq -sc '
+        group_by(.reqId) | map(last) |
+        map(
+          .input as $in | .output as $out |
+          .cache_5m as $c5 | .cache_1h as $c1 |
+          .cache_read as $cr | .total_in as $ti |
+          if (.model // "" | test("opus-4-[56]")) then
+            if .speed == "fast" and $ti > 200000 then
+              ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
+            elif .speed == "fast" then
+              ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
+            elif $ti > 200000 then
+              ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+            else
+              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            end
+          elif (.model // "" | test("opus")) then
+            ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
+          elif (.model // "" | test("haiku")) then
+            ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+          elif $ti > 200000 then
+            ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
+          else
+            ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
+          end
+        ) | add // 0
+      ' "$WEEK_TMP" 2>/dev/null) || WEEK_COST="0"
     else
       WEEK_COST="0"
     fi
 
-    # Si le calcul JSONL echoue (0), garder le cout precedent du cache
-    if [ "${WEEK_COST:-0}" = "0" ] && [ "$PREV_WEEK_COST" != "0" ] && [ -n "$PREV_WEEK_COST" ]; then
-      WEEK_COST="$PREV_WEEK_COST"
+    # --- Cout 5h : filtrer le meme WEEK_TMP par la fenetre 5h ---
+    BLOCK_COST="0"
+    BLOCK_START=""
+    if [ -n "$RESET_5H_RAW" ]; then
+      BLOCK_START=$(date -u -d "$RESET_5H_RAW - 5 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+    else
+      # Approximation : fenetre glissante de 5h depuis maintenant
+      BLOCK_START=$(date -u -d "now - 5 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
+    fi
+    if [ -n "$BLOCK_START" ] && [ -s "$WEEK_TMP" ]; then
+      BLOCK_COST=$(jq -sc --arg bs "$BLOCK_START" '
+        [ .[] | select(.ts > $bs) ] |
+        group_by(.reqId) | map(last) |
+        map(
+          .input as $in | .output as $out |
+          .cache_5m as $c5 | .cache_1h as $c1 |
+          .cache_read as $cr | .total_in as $ti |
+          if (.model // "" | test("opus-4-[56]")) then
+            if .speed == "fast" and $ti > 200000 then
+              ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
+            elif .speed == "fast" then
+              ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
+            elif $ti > 200000 then
+              ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+            else
+              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            end
+          elif (.model // "" | test("opus")) then
+            ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
+          elif (.model // "" | test("haiku")) then
+            ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+          elif $ti > 200000 then
+            ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
+          else
+            ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
+          end
+        ) | add // 0
+      ' "$WEEK_TMP" 2>/dev/null) || BLOCK_COST="0"
     fi
 
-    USAGE_DATA="${USAGE_DATA}|${WEEK_COST}"
+    rm -f "$WEEK_TMP"
   else
-    # API echouee : garder le cache precedent integralement
-    if [ -f "$USAGE_CACHE" ]; then
-      USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0"
-    else
-      USAGE_DATA="0||0|||0"
-    fi
+    WEEK_COST="0"
+    BLOCK_COST="0"
   fi
 
-  echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
+  # Fallback : si JSONL echoue, garder les couts precedents
+  if [ "${WEEK_COST:-0}" = "0" ] && [ "$PREV_WEEK_COST" != "0" ] && [ -n "$PREV_WEEK_COST" ]; then
+    WEEK_COST="$PREV_WEEK_COST"
+  fi
+  if [ "${BLOCK_COST:-0}" = "0" ] && [ "$PREV_BLOCK_COST" != "0" ] && [ -n "$PREV_BLOCK_COST" ]; then
+    BLOCK_COST="$PREV_BLOCK_COST"
+  fi
+
+  USAGE_DATA="${USAGE_DATA}|${WEEK_COST}|${BLOCK_COST}"
+
+  # Ne pas ecraser de bonnes donnees par des zeros
+  # Ecrire seulement si on a des donnees API fraiches OU des couts calcules
+  if [ "$API_HTTP" = "200" ] || [ "${WEEK_COST:-0}" != "0" ] || [ "${BLOCK_COST:-0}" != "0" ]; then
+    echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
+  elif [ -n "$PREV_USAGE" ]; then
+    # Tout a echoue : garder l'ancien cache intact, juste rafraichir le TTL
+    touch "$USAGE_CACHE" 2>/dev/null || true
+    USAGE_DATA="$PREV_USAGE"
+  fi
 else
-  USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0"
+  USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0|0"
 fi
 
 # Parsing du cache
-IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO _UNUSED WEEK_COST <<< "$USAGE_DATA"
+IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO _UNUSED WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
 PCT_5H_INT=$(printf '%.0f' "${PCT_5H:-0}" 2>/dev/null) || PCT_5H_INT=0
 PCT_7D_INT=$(printf '%.0f' "${PCT_7D:-0}" 2>/dev/null) || PCT_7D_INT=0
 
@@ -477,11 +560,12 @@ fi
 BAR_5H=$(mini_bar "$PCT_5H_INT" "$COLOR_5H")
 BAR_7D=$(mini_bar "$PCT_7D_INT" "$COLOR_7D")
 
-# --- Cout hebdo formate ---
+# --- Couts formates ---
 WEEK_COST_FMT=$(printf '$%.2f' "${WEEK_COST:-0}" 2>/dev/null) || WEEK_COST_FMT='$0.00'
+BLOCK_COST_FMT=$(printf '$%.2f' "${BLOCK_COST:-0}" 2>/dev/null) || BLOCK_COST_FMT='$0.00'
 
-BLOCK_SEG="$(printf '%b' "${WHITE}")5h$(printf '%b' "${RST}") ${BAR_5H} $(printf '%b' "${COLOR_5H}${BOLD}")${PCT_5H_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_5H}$(printf '%b' "${RST}")"
-WEEK_SEG="$(printf '%b' "${WHITE}")7j$(printf '%b' "${RST}") ${BAR_7D} $(printf '%b' "${COLOR_7D}${BOLD}")${PCT_7D_INT}%$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${WEEK_COST_FMT}$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_7D}$(printf '%b' "${RST}")"
+BLOCK_SEG="$(printf '%b' "${WHITE}")5h$(printf '%b' "${RST}") ${BAR_5H} $(printf '%b' "${COLOR_5H}${BOLD}")${PCT_5H_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_5H}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${BLOCK_COST_FMT}$(printf '%b' "${RST}")"
+WEEK_SEG="$(printf '%b' "${WHITE}")7j$(printf '%b' "${RST}") ${BAR_7D} $(printf '%b' "${COLOR_7D}${BOLD}")${PCT_7D_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_7D}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${WEEK_COST_FMT}$(printf '%b' "${RST}")"
 
 LINE3="${BLOCK_SEG}$(printf '%b' "${SEP}")${WEEK_SEG}"
 
