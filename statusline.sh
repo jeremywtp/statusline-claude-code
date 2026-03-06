@@ -127,16 +127,15 @@ if [ "${CTX_WIN_SIZE_INT:-0}" -gt 200000 ] 2>/dev/null; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}1M${RST}")"
 fi
 
-# Indicateur Fast mode (depuis settings.json)
-FAST_MODE=$(jq -r '.fastMode // false' "$HOME/.claude/settings.json" 2>/dev/null) || FAST_MODE="false"
+# Indicateurs Fast mode + Effort level (une seule lecture de settings.json)
+_SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
+FAST_MODE="${_SETTINGS%%|*}"
+EFFORT_LEVEL="${_SETTINGS#*|}"
 if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
 
-# Indicateur Effort level — barres verticales style signal
-# Le JSON statusline n'expose pas encore reasoning_effort (#9488)
-# On lit effortLevel dans settings.json, et "default" = medium
-EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$HOME/.claude/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
+# Barres verticales style signal pour l'effort level
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$EFFORT_LEVEL" in
   low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
@@ -263,6 +262,7 @@ CACHE_AGE=$(( NOW_SEC - ${CACHED_EPOCH:-0} ))
 if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOTAL_COST_TTL" ] || [ -z "$TOTAL_COST_VAL" ]; then
   # Lancer le calcul en background (non-bloquant)
   (
+    set +e  # Eviter que pipefail tue le subshell si grep ne trouve rien
     _TC=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f \
       -exec grep -h '"output_tokens"' {} + 2>/dev/null | \
       jq -c 'select(.type == "assistant" and .message.usage.output_tokens > 0) | [
@@ -272,19 +272,30 @@ if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOT
         (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0),
         (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0),
         (if .message.usage.speed == "fast" then 6 else 1 end),
-        ((.message.usage.input_tokens // 0) + (.message.usage.cache_creation_input_tokens // 0) + (.message.usage.cache_read_input_tokens // 0))
+        ((.message.usage.input_tokens // 0) + (.message.usage.cache_creation_input_tokens // 0) + (.message.usage.cache_read_input_tokens // 0)),
+        (.message.model // "unknown")
       ]' 2>/dev/null | jq -sc '
         group_by(.[0]) | map(last) |
         map(
-          .[7] as $m | .[8] as $ti |
-          if $ti > 200000 and $m == 6 then
-            (.[1]*60 + .[2]*225 + .[5]*75 + .[6]*120 + .[4]*6) / 1000000
-          elif $m == 6 then
-            (.[1]*30 + .[2]*150 + .[5]*37.5 + .[6]*60 + .[4]*3) / 1000000
+          .[7] as $m | .[8] as $ti | .[9] as $model |
+          if ($model | test("opus-4-[56]")) then
+            if $ti > 200000 and $m == 6 then
+              (.[1]*60 + .[2]*225 + .[5]*75 + .[6]*120 + .[4]*6) / 1000000
+            elif $m == 6 then
+              (.[1]*30 + .[2]*150 + .[5]*37.5 + .[6]*60 + .[4]*3) / 1000000
+            elif $ti > 200000 then
+              (.[1]*10 + .[2]*37.5 + .[5]*12.5 + .[6]*20 + .[4]*1) / 1000000
+            else
+              (.[1]*5 + .[2]*25 + .[5]*6.25 + .[6]*10 + .[4]*0.5) / 1000000
+            end
+          elif ($model | test("opus")) then
+            (.[1]*15 + .[2]*75 + .[5]*18.75 + .[6]*30 + .[4]*1.5) / 1000000
+          elif ($model | test("haiku")) then
+            (.[1]*1 + .[2]*5 + .[5]*1.25 + .[6]*2 + .[4]*0.1) / 1000000
           elif $ti > 200000 then
-            (.[1]*10 + .[2]*37.5 + .[5]*12.5 + .[6]*20 + .[4]*1) / 1000000
+            (.[1]*6 + .[2]*22.5 + .[5]*7.5 + .[6]*12 + .[4]*0.6) / 1000000
           else
-            (.[1]*5 + .[2]*25 + .[5]*6.25 + .[6]*10 + .[4]*0.5) / 1000000
+            (.[1]*3 + .[2]*15 + .[5]*3.75 + .[6]*6 + .[4]*0.3) / 1000000
           end
         ) | add // 0 | . * 100 | round / 100
       ')
@@ -308,10 +319,13 @@ LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${S
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
 # Source : /api/oauth/usage — donnees officielles du plan Max20
-# Cache dans /tmp avec TTL de 60 secondes
+# Cache dans /tmp avec TTL de 300s + backoff 600s sur 429 + flock multi-instances
 # ============================================================================
 USAGE_CACHE="/tmp/claude-sl-usage-cache"
-USAGE_CACHE_TTL=120
+USAGE_CACHE_TTL=300
+USAGE_BACKOFF_FILE="/tmp/claude-sl-usage-backoff"
+USAGE_BACKOFF_TTL=600
+USAGE_LOCK="/tmp/claude-sl-usage.lock"
 USAGE_SESSION_FILE="$HOME/.claude/usage-session"
 
 usage_cache_stale() {
@@ -322,7 +336,16 @@ usage_cache_stale() {
   [ $((now - file_age)) -gt "$USAGE_CACHE_TTL" ]
 }
 
-if usage_cache_stale; then
+# Backoff actif apres un 429 : attendre 10 min avant de reessayer
+usage_in_backoff() {
+  [ ! -f "$USAGE_BACKOFF_FILE" ] && return 1
+  local now file_age
+  now=$(date +%s)
+  file_age=$(stat -c %Y "$USAGE_BACKOFF_FILE" 2>/dev/null || echo 0)
+  [ $((now - file_age)) -le "$USAGE_BACKOFF_TTL" ]
+}
+
+if usage_cache_stale && ! usage_in_backoff; then
   # Recuperer le cache precedent pour fallback
   PREV_USAGE=""; PREV_WEEK_COST="0"; PREV_BLOCK_COST="0"
   if [ -f "$USAGE_CACHE" ]; then
@@ -331,7 +354,7 @@ if usage_cache_stale; then
     PREV_BLOCK_COST=$(echo "$PREV_USAGE" | awk -F'|' '{print $7}') || PREV_BLOCK_COST="0"
   fi
 
-  # --- Appel API OAuth usage (avec retry sur 429) ---
+  # --- Appel API OAuth usage (flock : un seul process a la fois) ---
   OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
   API_RESP=""
   API_HTTP=0
@@ -351,12 +374,16 @@ if usage_cache_stale; then
   }
 
   if [ -n "$OAUTH_TOKEN" ]; then
-    _fetch_usage
-    # Retry une fois sur 429
-    if [ "$API_HTTP" = "429" ]; then
-      sleep 2
+    # flock -n : non-bloquant, une seule instance appelle l'API
+    exec 9>"$USAGE_LOCK"
+    if flock -n 9; then
       _fetch_usage
+      # Sur 429 : activer le backoff de 10 min
+      if [ "$API_HTTP" = "429" ]; then
+        touch "$USAGE_BACKOFF_FILE" 2>/dev/null || true
+      fi
     fi
+    exec 9>&-
   fi
 
   # Valider que la reponse contient bien les champs attendus
@@ -432,7 +459,7 @@ if usage_cache_stale; then
 
   if [ -n "$WEEK_START" ]; then
     WEEK_TMP="/tmp/claude-sl-week-raw.jsonl"
-    find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 2>/dev/null -exec \
+    find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 -exec \
       jq -c --arg tw "$WEEK_START" \
         'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
          (.message.usage.input_tokens // 0) as $in |
@@ -443,7 +470,7 @@ if usage_cache_stale; then
           speed: (.message.usage.speed // "standard"),
           input: $in, output: (.message.usage.output_tokens // 0),
           cache_5m: $c5, cache_1h: $c1, cache_read: $cr,
-          total_in: ($in + $c5 + $c1 + $cr)}' {} \; > "$WEEK_TMP" 2>/dev/null || true
+          total_in: ($in + $c5 + $c1 + $cr)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
       # Prix officiels Anthropic (USD / MTok) — mars 2026
@@ -525,30 +552,27 @@ if usage_cache_stale; then
   fi
 
   # Fallback : si JSONL echoue, garder les couts precedents
-  if [ "${WEEK_COST:-0}" = "0" ] && [ "$PREV_WEEK_COST" != "0" ] && [ -n "$PREV_WEEK_COST" ]; then
+  WEEK_COST="${WEEK_COST:-0}"
+  BLOCK_COST="${BLOCK_COST:-0}"
+  if [ "$WEEK_COST" = "0" ] && [ -n "$PREV_WEEK_COST" ] && [ "$PREV_WEEK_COST" != "0" ]; then
     WEEK_COST="$PREV_WEEK_COST"
   fi
-  if [ "${BLOCK_COST:-0}" = "0" ] && [ "$PREV_BLOCK_COST" != "0" ] && [ -n "$PREV_BLOCK_COST" ]; then
+  if [ "$BLOCK_COST" = "0" ] && [ -n "$PREV_BLOCK_COST" ] && [ "$PREV_BLOCK_COST" != "0" ]; then
     BLOCK_COST="$PREV_BLOCK_COST"
   fi
 
   USAGE_DATA="${USAGE_DATA}|${WEEK_COST}|${BLOCK_COST}"
 
-  # Ne pas ecraser de bonnes donnees par des zeros
-  # Ecrire seulement si on a des donnees API fraiches OU des couts calcules
-  if [ "$API_HTTP" = "200" ] || [ "${WEEK_COST:-0}" != "0" ] || [ "${BLOCK_COST:-0}" != "0" ]; then
-    echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
-  elif [ -n "$PREV_USAGE" ]; then
-    # Tout a echoue : garder l'ancien cache intact, juste rafraichir le TTL
-    touch "$USAGE_CACHE" 2>/dev/null || true
-    USAGE_DATA="$PREV_USAGE"
-  fi
+  # Toujours ecrire les 7 champs dans le cache
+  echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
 else
   USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0|0"
 fi
 
-# Parsing du cache
+# Parsing du cache (garantir 7 champs meme si cache ancien/incomplet)
 IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO _UNUSED WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
+WEEK_COST="${WEEK_COST:-0}"
+BLOCK_COST="${BLOCK_COST:-0}"
 PCT_5H_INT=$(printf '%.0f' "${PCT_5H:-0}" 2>/dev/null) || PCT_5H_INT=0
 PCT_7D_INT=$(printf '%.0f' "${PCT_7D:-0}" 2>/dev/null) || PCT_7D_INT=0
 

@@ -35,7 +35,7 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
 - Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel**
-- Donnees recuperees via l'API OAuth Anthropic (cache 120s, persistance durable)
+- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, flock multi-instances)
 
 ## Calcul des couts
 
@@ -45,7 +45,7 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 
 ### Cout total lifetime
 
-Le cout total cumule toutes les sessions depuis le premier lancement de Claude Code. Le calcul est lance en **background** (~3s) pour ne jamais bloquer l'affichage. Le resultat est cache dans `~/.claude/total-cost-cache` et recalcule automatiquement quand la taille des fichiers JSONL change (TTL minimum 300s). Utilise `grep` comme pre-filtre rapide suivi de `jq` pour la deduplication et le pricing.
+Le cout total cumule toutes les sessions depuis le premier lancement de Claude Code. Le calcul est lance en **background** pour ne jamais bloquer l'affichage. Le resultat est cache dans `~/.claude/total-cost-cache` et recalcule automatiquement quand la taille des fichiers JSONL change (TTL minimum 300s). Utilise `grep` comme pre-filtre rapide suivi de `jq` pour la deduplication et le pricing par modele (Opus 4.5/4.6, Opus legacy, Sonnet, Haiku).
 
 ### Prix (USD / MTok) — Mars 2026
 
@@ -117,17 +117,22 @@ chmod +x ~/.claude/statusline.sh
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
 | `~/.claude/total-cost-cache` | Cout total lifetime (`COST\|BYTES\|EPOCH`) — calcul background ~3s | 300s + detection changement |
-| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j) | 120s |
+| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j, 7 champs) | 300s |
+| `/tmp/claude-sl-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
+| `/tmp/claude-sl-usage.lock` | Flock — un seul appel API a la fois (multi-instances) | — |
 | `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
 | `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
 
 ## Resilience API
 
-L'API `/api/oauth/usage` est sujette a du rate limiting (429). Le script utilise une chaine de fallback a 3 niveaux pour ne jamais perdre les donnees :
+L'API `/api/oauth/usage` est sujette a du rate limiting (429). Le script combine plusieurs mecanismes de protection :
 
-1. **API OK (200)** — met a jour le cache `/tmp` + le fichier durable `~/.claude/usage-session`
-2. **API 429 + cache existant** — garde les anciennes valeurs du cache
-3. **API 429 + cache vide** — lit le fichier durable (survit aux reboots et purges /tmp)
+- **Backoff 429** : apres un 429, attend 10 min avant de reessayer (`/tmp/claude-sl-usage-backoff`)
+- **Flock** : un seul process appelle l'API a la fois (non-bloquant, les autres utilisent le cache)
+- **Fallback 3 niveaux** pour ne jamais perdre les donnees :
+  1. **API OK (200)** — met a jour le cache `/tmp` + le fichier durable `~/.claude/usage-session`
+  2. **API echouee + cache existant** — recalcule les couts depuis les JSONL, preserve les quotas du cache
+  3. **Cache vide** — lit le fichier durable (survit aux reboots et purges /tmp)
 
 Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
 
@@ -135,7 +140,7 @@ Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
 
 Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse avec `jq` pour extraire les infos du modele, du contexte, de la session et du git.
 
-Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (120s) en scannant tous les fichiers JSONL du repertoire `~/.claude/projects/`.
+Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (300s) en scannant les fichiers JSONL du repertoire `~/.claude/projects/` (batch `find -exec +` pour performance).
 
 ## Licence
 
