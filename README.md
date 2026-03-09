@@ -22,7 +22,12 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 
 - Nom du projet courant
 - Branche git avec fichiers staged (`+`), modifies (`~`), et untracked (`?`)
 - Version de Claude Code
-- Indicateur **status Claude** : `●` vert (OK), orange (degrade), rouge (incident) — via [status.claude.com](https://status.claude.com)
+- Indicateur **status Claude** via [status.claude.com](https://status.claude.com) (API `summary.json`, cache 60s) :
+  - `●` vert — Operational
+  - `●` jaune — Degraded Performance
+  - `●` orange — Partial Outage
+  - `●` rouge — Major Outage
+  - `●` bleu — Maintenance
 
 **Ligne 2 — Contexte & Session**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)

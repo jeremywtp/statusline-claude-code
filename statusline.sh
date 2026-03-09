@@ -28,6 +28,7 @@ BRED='\033[91m'
 BGREEN='\033[92m'
 BYELLOW='\033[93m'
 BCYAN='\033[96m'
+ORANGE='\033[38;5;208m'
 
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
@@ -173,19 +174,50 @@ _status_stale() {
 }
 
 if _status_stale; then
-  _STATUS_JSON=$(curl -sf --max-time 3 "https://status.claude.com/api/v2/status.json" 2>/dev/null) || _STATUS_JSON=""
+  # summary.json inclut incidents, composants et maintenances programmees
+  _STATUS_JSON=$(curl -sf --max-time 3 "https://status.claude.com/api/v2/summary.json" 2>/dev/null) || _STATUS_JSON=""
   if [ -n "$_STATUS_JSON" ]; then
-    echo "$_STATUS_JSON" | jq -r '.status.indicator // "none"' > "$STATUS_CACHE" 2>/dev/null || true
+    echo "$_STATUS_JSON" | jq -r '
+      # Severite des incidents non resolus
+      (
+        [.incidents // [] | .[] | select(.resolved_at == null) | .impact] |
+        if any(. == "critical") then 4
+        elif any(. == "major") then 3
+        elif any(. == "minor") then 2
+        else 0 end
+      ) as $inc |
+      # Severite des composants (pire etat)
+      (
+        [.components // [] | .[] | .status] |
+        if any(. == "major_outage") then 4
+        elif any(. == "partial_outage") then 3
+        elif any(. == "degraded_performance") then 2
+        elif any(. == "under_maintenance") then -1
+        else 0 end
+      ) as $comp |
+      # Maintenance en cours
+      (
+        [.scheduled_maintenances // [] | .[] | select(.status == "in_progress")] | length > 0
+      ) as $maint |
+      # Priorite : pire severite, puis maintenance
+      if ($inc >= $comp and $inc > 0) then
+        (if $inc >= 4 then "critical" elif $inc >= 3 then "major" else "minor" end)
+      elif $comp > 0 then
+        (if $comp >= 4 then "critical" elif $comp >= 3 then "major" else "minor" end)
+      elif $comp == -1 or $maint then "maintenance"
+      else "none" end
+    ' > "$STATUS_CACHE" 2>/dev/null || true
   fi
 fi
 
 STATUS_IND=$(cat "$STATUS_CACHE" 2>/dev/null) || STATUS_IND="none"
 DOT="\xe2\x97\x8f"  # ●
 case "$STATUS_IND" in
-  none)     LINE1="${LINE1} $(printf '%b' "${BGREEN}${DOT}${RST}")" ;;
-  minor)    LINE1="${LINE1} $(printf '%b' "${BYELLOW}${DOT}${RST}")" ;;
-  major)    LINE1="${LINE1} $(printf '%b' "${BRED}${DOT}${RST}")" ;;
-  critical) LINE1="${LINE1} $(printf '%b' "${BRED}${BOLD}${DOT}${RST}")" ;;
+  none)        LINE1="${LINE1} $(printf '%b' "${BGREEN}${DOT}${RST}")" ;;
+  minor)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${DOT}${RST}")" ;;
+  major)       LINE1="${LINE1} $(printf '%b' "${ORANGE}${DOT}${RST}")" ;;
+  critical)    LINE1="${LINE1} $(printf '%b' "${BRED}${DOT}${RST}")" ;;
+  maintenance) LINE1="${LINE1} $(printf '%b' "${BLUE}${DOT}${RST}")" ;;
 esac
 
 # ============================================================================
