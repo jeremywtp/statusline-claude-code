@@ -38,7 +38,7 @@ SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
 MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0
 LINES_ADD=0; LINES_REM=0; CTX_PCT=0; CTX_WIN_SIZE=0
-EXCEEDS_200K=false; AGENT_NAME=""; VIM_MODE=""
+EXCEEDS_200K=false; AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""
 
 _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "MODEL_NAME=\(.model.display_name // "---")",
@@ -52,7 +52,8 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "CTX_WIN_SIZE=\(.context_window.context_window_size // 0)",
   @sh "EXCEEDS_200K=\(.exceeds_200k_tokens // false)",
   @sh "AGENT_NAME=\(.agent.name // "")",
-  @sh "VIM_MODE=\(.vim.mode // "")"
+  @sh "VIM_MODE=\(.vim.mode // "")",
+  @sh "TRANSCRIPT_PATH=\(.transcript_path // "")"
 ' 2>/dev/null) || true
 
 [ -n "$_JQ_OUT" ] && eval "$_JQ_OUT"
@@ -128,10 +129,18 @@ if [ "${CTX_WIN_SIZE_INT:-0}" -gt 200000 ] 2>/dev/null; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}1M${RST}")"
 fi
 
-# Indicateurs Fast mode + Effort level (une seule lecture de settings.json)
+# Indicateurs Fast mode + Effort level
+# 1) settings.json pour fastMode et effortLevel persistant
 _SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
 FAST_MODE="${_SETTINGS%%|*}"
 EFFORT_LEVEL="${_SETTINGS#*|}"
+# 2) Effort reel : lire le JSONL de session (capture le choix via /model)
+#    Priorite : sortie /model (local-command-stdout) > system-reminder > settings.json
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  _LIVE_EFFORT=$(grep -oP 'with \\u001b\[1m\K[^\\]+(?=\\u001b\[22m effort)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
+  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -oP "has requested reasoning effort level: \K\w+" "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+  [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
+fi
 if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
@@ -139,9 +148,10 @@ fi
 # Barres verticales style signal pour l'effort level
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$EFFORT_LEVEL" in
-  low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-  high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-  *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
+  low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+  high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
+  max)     LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+  *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
 esac
 
 # Agent (si present)

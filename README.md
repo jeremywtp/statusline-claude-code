@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 ●
+Claude Opus 4.6 1M ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.72 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ Σ $1501
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
@@ -16,7 +16,11 @@ Claude Opus 4.6 1M ⚡ ▌▌░ │ my-project │ * main +2 ~1 ?3 │ v2.1.69 
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **1M** (jaune) si le contexte est > 200K tokens
 - Indicateur **⚡** (jaune) si le fast mode est actif (`fastMode` dans `settings.json`)
-- Indicateur **effort level** en barres verticales : `▌░░` low (cyan), `▌▌░` medium/default (jaune), `▌▌▌` high (rouge)
+- Indicateur **effort level** en barres verticales (detection live via `/model` dans le JSONL de session) :
+  - `▌░░░` low (cyan)
+  - `▌▌░░` medium/default (jaune)
+  - `▌▌▌░` high (rouge)
+  - `▌▌▌▌` max (magenta, Opus 4.6 uniquement)
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
