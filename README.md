@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Claude Opus 4.6 1M ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.72 ●
+Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ Σ $1501
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
@@ -14,8 +14,7 @@ Claude Opus 4.6 1M ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.
 
 **Ligne 1 — Identite & Git**
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
-- Indicateur **1M** (jaune) si le contexte est > 200K tokens
-- Indicateur **⚡** (jaune) si le fast mode est actif (`fastMode` dans `settings.json`)
+- Indicateur **⚡** (jaune) si le fast mode est actif
 - Indicateur **effort level** en barres verticales (detection live via `/model` dans le JSONL de session) :
   - `▌░░░` low (cyan)
   - `▌▌░░` medium/default (jaune)
@@ -35,7 +34,6 @@ Claude Opus 4.6 1M ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.
 
 **Ligne 2 — Contexte & Session**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
-- Alerte `!` rouge si > 200K tokens
 - Cout de la session courante (USD)
 - **Cout total lifetime** `(Σ$X,XXX)` — cumul de toutes les sessions depuis le premier lancement (calcul background, cache durable)
 - Lignes ajoutees/supprimees
@@ -62,10 +60,7 @@ Le cout total cumule toutes les sessions depuis le premier lancement de Claude C
 |---|---|---|---|---|---|
 | **Opus 4.6** | $5 | $25 | $6.25 | $10 | $0.50 |
 | **Opus 4.6 Fast** | $30 | $150 | $37.50 | $60 | $3 |
-| **Opus 4.6 Long (>200K)** | $10 | $37.50 | $12.50 | $20 | $1 |
-| **Opus 4.6 Fast + Long** | $60 | $225 | $75 | $120 | $6 |
 | **Sonnet 4.6** | $3 | $15 | $3.75 | $6 | $0.30 |
-| **Sonnet Long (>200K)** | $6 | $22.50 | $7.50 | $12 | $0.60 |
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
 | Opus legacy | $15 | $75 | $18.75 | $30 | $1.50 |
 
@@ -122,7 +117,7 @@ chmod +x ~/.claude/statusline.sh
 | Fichier | Description | TTL |
 |---|---|---|
 | `~/.claude/statusline.sh` | Script principal | — |
-| `~/.claude/settings.json` | Config Claude Code (fastMode, effortLevel, statusLine) | — |
+| `~/.claude/settings.json` | Config Claude Code (statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
 | `~/.claude/total-cost-cache` | Cout total lifetime (`COST\|BYTES\|EPOCH`) — calcul background ~3s | 300s + detection changement |

@@ -37,8 +37,8 @@ SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
 MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0
-LINES_ADD=0; LINES_REM=0; CTX_PCT=0; CTX_WIN_SIZE=0
-EXCEEDS_200K=false; AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""
+LINES_ADD=0; LINES_REM=0; CTX_PCT=0
+AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""
 
 _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "MODEL_NAME=\(.model.display_name // "---")",
@@ -49,8 +49,6 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "LINES_ADD=\(.cost.total_lines_added // 0)",
   @sh "LINES_REM=\(.cost.total_lines_removed // 0)",
   @sh "CTX_PCT=\(.context_window.used_percentage // 0)",
-  @sh "CTX_WIN_SIZE=\(.context_window.context_window_size // 0)",
-  @sh "EXCEEDS_200K=\(.exceeds_200k_tokens // false)",
   @sh "AGENT_NAME=\(.agent.name // "")",
   @sh "VIM_MODE=\(.vim.mode // "")",
   @sh "TRANSCRIPT_PATH=\(.transcript_path // "")"
@@ -122,12 +120,6 @@ fi
 # LIGNE 1 : Modele | Projet | Git | Version
 # ============================================================================
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
-
-# Indicateur 1M context
-CTX_WIN_SIZE_INT=${CTX_WIN_SIZE%.*}
-if [ "${CTX_WIN_SIZE_INT:-0}" -gt 200000 ] 2>/dev/null; then
-  LINE1="${LINE1} $(printf '%b' "${BYELLOW}1M${RST}")"
-fi
 
 # Indicateurs Fast mode + Effort level
 # 1) settings.json pour fastMode et effortLevel persistant
@@ -256,11 +248,7 @@ BAR_EMPTY=""
 for ((i=0; i<FILLED; i++)); do BAR_FILLED+="█"; done
 for ((i=0; i<EMPTY; i++)); do BAR_EMPTY+="░"; done
 
-# Alerte >200k tokens
-WARN_200K=""
-[ "$EXCEEDS_200K" = "true" ] && WARN_200K=" $(printf '%b' "${BRED}!${RST}")"
-
-BAR_SEGMENT="$(printf '%b' "${BAR_COLOR}")${BAR_FILLED}$(printf '%b' "${DIM}${GRAY}")${BAR_EMPTY}$(printf '%b' "${RST}") ${PCT_LABEL}${WARN_200K}"
+BAR_SEGMENT="$(printf '%b' "${BAR_COLOR}")${BAR_FILLED}$(printf '%b' "${DIM}${GRAY}")${BAR_EMPTY}$(printf '%b' "${RST}") ${PCT_LABEL}"
 
 # --- Session : cout ---
 COST_FMT=$(printf '$%.2f' "$COST" 2>/dev/null) || COST_FMT='$0.00'
@@ -314,19 +302,14 @@ if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOT
         (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0),
         (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0),
         (if .message.usage.speed == "fast" then 6 else 1 end),
-        ((.message.usage.input_tokens // 0) + (.message.usage.cache_creation_input_tokens // 0) + (.message.usage.cache_read_input_tokens // 0)),
         (.message.model // "unknown")
       ]' 2>/dev/null | jq -sc '
         group_by(.[0]) | map(last) |
         map(
-          .[7] as $m | .[8] as $ti | .[9] as $model |
+          .[7] as $m | .[8] as $model |
           if ($model | test("opus-4-[56]")) then
-            if $ti > 200000 and $m == 6 then
-              (.[1]*60 + .[2]*225 + .[5]*75 + .[6]*120 + .[4]*6) / 1000000
-            elif $m == 6 then
+            if $m == 6 then
               (.[1]*30 + .[2]*150 + .[5]*37.5 + .[6]*60 + .[4]*3) / 1000000
-            elif $ti > 200000 then
-              (.[1]*10 + .[2]*37.5 + .[5]*12.5 + .[6]*20 + .[4]*1) / 1000000
             else
               (.[1]*5 + .[2]*25 + .[5]*6.25 + .[6]*10 + .[4]*0.5) / 1000000
             end
@@ -334,8 +317,6 @@ if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOT
             (.[1]*15 + .[2]*75 + .[5]*18.75 + .[6]*30 + .[4]*1.5) / 1000000
           elif ($model | test("haiku")) then
             (.[1]*1 + .[2]*5 + .[5]*1.25 + .[6]*2 + .[4]*0.1) / 1000000
-          elif $ti > 200000 then
-            (.[1]*6 + .[2]*22.5 + .[5]*7.5 + .[6]*12 + .[4]*0.6) / 1000000
           else
             (.[1]*3 + .[2]*15 + .[5]*3.75 + .[6]*6 + .[4]*0.3) / 1000000
           end
@@ -511,8 +492,7 @@ if usage_cache_stale && ! usage_in_backoff; then
          {ts: .timestamp, reqId: .requestId, model: .message.model,
           speed: (.message.usage.speed // "standard"),
           input: $in, output: (.message.usage.output_tokens // 0),
-          cache_5m: $c5, cache_1h: $c1, cache_read: $cr,
-          total_in: ($in + $c5 + $c1 + $cr)}' {} + > "$WEEK_TMP" 2>/dev/null || true
+          cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
       # Prix officiels Anthropic (USD / MTok) — mars 2026
@@ -521,14 +501,10 @@ if usage_cache_stale && ! usage_in_backoff; then
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
-          .cache_read as $cr | .total_in as $ti |
+          .cache_read as $cr |
           if (.model // "" | test("opus-4-[56]")) then
-            if .speed == "fast" and $ti > 200000 then
-              ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
-            elif .speed == "fast" then
+            if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
-            elif $ti > 200000 then
-              ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
@@ -536,8 +512,6 @@ if usage_cache_stale && ! usage_in_backoff; then
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("haiku")) then
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
-          elif $ti > 200000 then
-            ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
           else
             ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
           end
@@ -563,14 +537,10 @@ if usage_cache_stale && ! usage_in_backoff; then
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
-          .cache_read as $cr | .total_in as $ti |
+          .cache_read as $cr |
           if (.model // "" | test("opus-4-[56]")) then
-            if .speed == "fast" and $ti > 200000 then
-              ($in*60 + $out*225 + $c5*75 + $c1*120 + $cr*6) / 1000000
-            elif .speed == "fast" then
+            if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
-            elif $ti > 200000 then
-              ($in*10 + $out*37.5 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
@@ -578,8 +548,6 @@ if usage_cache_stale && ! usage_in_backoff; then
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("haiku")) then
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
-          elif $ti > 200000 then
-            ($in*6 + $out*22.5 + $c5*7.5 + $c1*12 + $cr*0.6) / 1000000
           else
             ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
           end
