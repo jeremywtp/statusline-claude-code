@@ -126,11 +126,14 @@ LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 _SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
 FAST_MODE="${_SETTINGS%%|*}"
 EFFORT_LEVEL="${_SETTINGS#*|}"
-# 2) Effort reel : lire le JSONL de session (capture le choix via /model)
-#    Priorite : sortie /model (local-command-stdout) > system-reminder > settings.json
+# 2) Effort reel : lire le JSONL de session (capture le choix via /effort ou /model)
+#    Filtre sur <local-command-stdout> pour ignorer le contenu des messages assistant
+#    Priorite : "Set effort level to X" > "Effort level: X" > settings.json
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  _LIVE_EFFORT=$(grep -oP 'with \\u001b\[1m\K[^\\]+(?=\\u001b\[22m effort)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
-  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -oP "has requested reasoning effort level: \K\w+" "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+  # Pattern 1 : "<local-command-stdout>Set effort level to max (this session only)"
+  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
+  # Pattern 2 : "<local-command-stdout>Effort level: auto" ou "Current effort level: medium"
+  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
   [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
 fi
 if [ "$FAST_MODE" = "true" ]; then

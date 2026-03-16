@@ -15,7 +15,7 @@ Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2
 **Ligne 1 — Identite & Git**
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
-- Indicateur **effort level** en barres verticales (detection live via `/model` dans le JSONL de session) :
+- Indicateur **effort level** en barres verticales (detection live via `<local-command-stdout>` dans le JSONL de session) :
   - `▌░░░` low (cyan)
   - `▌▌░░` medium/default (jaune)
   - `▌▌▌░` high (rouge)
