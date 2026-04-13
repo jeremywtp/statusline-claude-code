@@ -6,7 +6,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ```
 Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
-██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 21h-15h ██████░░ 3h19
+██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -79,14 +79,14 @@ Le fast mode (x6 sur tous les prix) est detecte de deux manieres :
 
 Anthropic ajuste les limites de session 5h pendant les heures de pointe ([source](https://x.com/trq212)). Le script detecte automatiquement la fenetre active :
 
-| Etat | Condition (UTC) | Couleur |
+| Etat | Condition (Pacific Time) | Couleur |
 |---|---|---|
-| **NORMAL** | Lun-ven hors 13h-19h | Terracotta (`#cc785c`) |
-| **NERFED** | Lun-ven 13h-19h | Gris mute (`#828179`) |
-| **WEEKEND** | Ven 19h → lun 13h | Terracotta |
+| **NORMAL** | Lun-ven hors 5h-11h PT | Terracotta (`#cc785c`) |
+| **NERFED** | Lun-ven 5h-11h PT | Gris mute (`#828179`) |
+| **WEEKEND** | Ven 11h PT → lun 5h PT | Terracotta |
 
-- Calcul local base sur l'heure UTC, zero appel API
-- Heures affichees en timezone locale (ex: 15h-21h CEST, 14h-20h CET)
+- Reference Pacific Time (suit le DST US automatiquement via `TZ`)
+- Heures affichees en timezone locale (ex: 14h-20h CEST/CET)
 - Barre de progression 8 blocs dans la fenetre courante
 - Countdown vers la prochaine transition
 - Couleurs inspirees de [is-claude-nerfed-right-now.vercel.app](https://is-claude-nerfed-right-now.vercel.app/)

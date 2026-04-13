@@ -278,52 +278,57 @@ DURATION_SEGMENT="$(printf '%b' "${GRAY}")${DURATION_FMT}$(printf '%b' "${RST}")
 
 # ============================================================================
 # INDICATEUR PEAK/OFF-PEAK (heures de pointe Anthropic)
-# Peak: lun-ven 13h-19h UTC (5h-11h PT) — limites 5h consommees plus vite
+# Peak: lun-ven 5h-11h Pacific Time — limites 5h consommees plus vite
+# Reference PT (suit le DST US automatiquement via TZ)
 # Source: tweet Thariq @trq212 (26 mars 2026)
 # Couleurs: is-claude-nerfed-right-now.vercel.app (#cc785c / #828179)
 # ============================================================================
 ACCENT='\033[38;5;173m'    # Terracotta ~ #cc785c (normal/boost)
 MUTED_FG='\033[38;5;245m'  # Gris mute ~ #828179 (nerfed/peak)
 
-read -r _UTC_H _UTC_M _DOW <<< "$(date -u +'%-H %-M %u')"
+# Heure et jour en Pacific Time (reference Anthropic)
+read -r _PT_H _PT_M _PT_DOW <<< "$(TZ='America/Los_Angeles' date +'%-H %-M %u')"
 
-# Heures peak en timezone locale (pour affichage)
-_LP_S=$(date -d '13:00 UTC' +%-H 2>/dev/null) || _LP_S=14
-_LP_E=$(date -d '19:00 UTC' +%-H 2>/dev/null) || _LP_E=20
+# Peak 5-11 AM PT → heures locales (pour affichage)
+_PEAK_S_EP=$(TZ='America/Los_Angeles' date -d 'today 05:00' +%s 2>/dev/null) || _PEAK_S_EP=0
+_PEAK_E_EP=$(TZ='America/Los_Angeles' date -d 'today 11:00' +%s 2>/dev/null) || _PEAK_E_EP=0
+_LP_S=$(date -d "@$_PEAK_S_EP" +%-H 2>/dev/null) || _LP_S=14
+_LP_E=$(date -d "@$_PEAK_E_EP" +%-H 2>/dev/null) || _LP_E=20
 
-if [ "$_DOW" -ge 6 ] || { [ "$_DOW" -eq 5 ] && [ "$_UTC_H" -ge 19 ]; }; then
-  # --- Weekend (vendredi soir inclus) ---
+if [ "$_PT_DOW" -ge 6 ] || { [ "$_PT_DOW" -eq 5 ] && [ "$_PT_H" -ge 11 ]; } || { [ "$_PT_DOW" -eq 1 ] && [ "$_PT_H" -lt 5 ]; }; then
+  # --- Weekend (ven 11h PT → lun 5h PT = 66h) ---
   _NC="$ACCENT"
   _NL="WEEKEND"
   _NI=""
-  case "$_DOW" in
-    5) _EL=$(( (_UTC_H - 19) * 60 + _UTC_M )) ;;
-    6) _EL=$(( (_UTC_H + 5) * 60 + _UTC_M )) ;;
-    7) _EL=$(( (_UTC_H + 29) * 60 + _UTC_M )) ;;
+  case "$_PT_DOW" in
+    5) _EL=$(( (_PT_H - 11) * 60 + _PT_M )) ;;
+    6) _EL=$(( (_PT_H + 13) * 60 + _PT_M )) ;;
+    7) _EL=$(( (_PT_H + 37) * 60 + _PT_M )) ;;
+    1) _EL=$(( (_PT_H + 61) * 60 + _PT_M )) ;;
   esac
-  _TT=3960  # 66h : ven 19h UTC → lun 13h UTC
+  _TT=3960  # 66h
   _RM=$(( _TT - _EL ))
 
-elif [ "$_UTC_H" -ge 13 ] && [ "$_UTC_H" -lt 19 ]; then
-  # --- Peak (nerfed) ---
+elif [ "$_PT_H" -ge 5 ] && [ "$_PT_H" -lt 11 ]; then
+  # --- Peak (nerfed) : 5-11 AM PT = 6h ---
   _NC="$MUTED_FG"
   _NL="NERFED"
   _NI="${_LP_S}h-${_LP_E}h"
-  _EL=$(( (_UTC_H - 13) * 60 + _UTC_M ))
-  _TT=360   # 6h peak
+  _EL=$(( (_PT_H - 5) * 60 + _PT_M ))
+  _TT=360
   _RM=$(( _TT - _EL ))
 
 else
-  # --- Off-peak (normal) ---
+  # --- Off-peak (normal) : 11 AM → 5 AM PT = 18h ---
   _NC="$ACCENT"
   _NL="NORMAL"
   _NI="${_LP_E}h-${_LP_S}h"
-  if [ "$_UTC_H" -ge 19 ]; then
-    _EL=$(( (_UTC_H - 19) * 60 + _UTC_M ))
+  if [ "$_PT_H" -ge 11 ]; then
+    _EL=$(( (_PT_H - 11) * 60 + _PT_M ))
   else
-    _EL=$(( (_UTC_H + 5) * 60 + _UTC_M ))
+    _EL=$(( (_PT_H + 13) * 60 + _PT_M ))
   fi
-  _TT=1080  # 18h off-peak
+  _TT=1080
   _RM=$(( _TT - _EL ))
 fi
 
