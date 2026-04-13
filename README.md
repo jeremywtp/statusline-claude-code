@@ -1,12 +1,12 @@
 # Claude Code Statusline
 
-Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, cout total lifetime, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
+Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
 
 ## Preview
 
 ```
 Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
-██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ Σ $1501
+██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 21h-15h ██████░░ 3h19
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -35,9 +35,14 @@ Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2
 **Ligne 2 — Contexte & Session**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
 - Cout de la session courante (USD)
-- **Cout total lifetime** `(Σ$X,XXX)` — cumul de toutes les sessions depuis le premier lancement (calcul background, cache durable)
 - Lignes ajoutees/supprimees
 - Duree de la session
+- **Indicateur peak/off-peak** — heures de pointe Anthropic (lun-ven 13h-19h UTC) :
+  - `NORMAL` (terracotta) — off-peak, limites 5h normales
+  - `NERFED` (gris) — peak, limites 5h consommees plus vite
+  - `WEEKEND` (terracotta) — off-peak tout le weekend
+  - Barre de progression + countdown vers la prochaine transition
+  - Couleurs inspirees de [is-claude-nerfed-right-now.vercel.app](https://is-claude-nerfed-right-now.vercel.app/)
 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
@@ -46,13 +51,9 @@ Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2
 
 ## Calcul des couts
 
-Les couts (5h, hebdo et lifetime) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
+Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
-
-### Cout total lifetime
-
-Le cout total cumule toutes les sessions depuis le premier lancement de Claude Code. Le calcul est lance en **background** pour ne jamais bloquer l'affichage. Le resultat est cache dans `~/.claude/total-cost-cache` et recalcule automatiquement quand la taille des fichiers JSONL change (TTL minimum 300s). Utilise `grep` comme pre-filtre rapide suivi de `jq` pour la deduplication et le pricing par modele (Opus 4.5/4.6, Opus legacy, Sonnet, Haiku).
 
 ### Prix (USD / MTok) — Mars 2026
 
@@ -73,6 +74,22 @@ Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-sess
 Le fast mode (x6 sur tous les prix) est detecte de deux manieres :
 - **Affichage ⚡** : lit `fastMode` dans `~/.claude/settings.json` (session courante)
 - **Calcul cout** : lit le champ `speed` de chaque requete dans les JSONL (historique precis)
+
+### Indicateur peak/off-peak
+
+Anthropic ajuste les limites de session 5h pendant les heures de pointe ([source](https://x.com/trq212)). Le script detecte automatiquement la fenetre active :
+
+| Etat | Condition (UTC) | Couleur |
+|---|---|---|
+| **NORMAL** | Lun-ven hors 13h-19h | Terracotta (`#cc785c`) |
+| **NERFED** | Lun-ven 13h-19h | Gris mute (`#828179`) |
+| **WEEKEND** | Ven 19h → lun 13h | Terracotta |
+
+- Calcul local base sur l'heure UTC, zero appel API
+- Heures affichees en timezone locale (ex: 15h-21h CEST, 14h-20h CET)
+- Barre de progression 8 blocs dans la fenetre courante
+- Countdown vers la prochaine transition
+- Couleurs inspirees de [is-claude-nerfed-right-now.vercel.app](https://is-claude-nerfed-right-now.vercel.app/)
 
 ### Thinking tokens
 
@@ -120,7 +137,6 @@ chmod +x ~/.claude/statusline.sh
 | `~/.claude/settings.json` | Config Claude Code (statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
-| `~/.claude/total-cost-cache` | Cout total lifetime (`COST\|BYTES\|EPOCH`) — calcul background ~3s | 300s + detection changement |
 | `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j, 7 champs) | 300s |
 | `/tmp/claude-sl-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
 | `/tmp/claude-sl-usage.lock` | Flock — un seul appel API a la fois (multi-instances) | — |

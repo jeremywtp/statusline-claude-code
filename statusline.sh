@@ -277,70 +277,87 @@ fi
 DURATION_SEGMENT="$(printf '%b' "${GRAY}")${DURATION_FMT}$(printf '%b' "${RST}")"
 
 # ============================================================================
-# COUT TOTAL LIFETIME (background calc avec cache durable)
+# INDICATEUR PEAK/OFF-PEAK (heures de pointe Anthropic)
+# Peak: lun-ven 13h-19h UTC (5h-11h PT) — limites 5h consommees plus vite
+# Source: tweet Thariq @trq212 (26 mars 2026)
+# Couleurs: is-claude-nerfed-right-now.vercel.app (#cc785c / #828179)
 # ============================================================================
-TOTAL_COST_CACHE="$HOME/.claude/total-cost-cache"
-TOTAL_COST_TTL=300
+ACCENT='\033[38;5;173m'    # Terracotta ~ #cc785c (normal/boost)
+MUTED_FG='\033[38;5;245m'  # Gris mute ~ #828179 (nerfed/peak)
 
-TOTAL_COST_VAL=""
-if [ -f "$TOTAL_COST_CACHE" ]; then
-  IFS='|' read -r TOTAL_COST_VAL CACHED_BYTES CACHED_EPOCH < "$TOTAL_COST_CACHE" 2>/dev/null || true
-fi
+read -r _UTC_H _UTC_M _DOW <<< "$(date -u +'%-H %-M %u')"
 
-# Check rapide : taille totale des JSONL a change ?
-CURRENT_BYTES=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1}END{print s+0}')
-NOW_SEC=$(date +%s)
-CACHE_AGE=$(( NOW_SEC - ${CACHED_EPOCH:-0} ))
+# Heures peak en timezone locale (pour affichage)
+_LP_S=$(date -d '13:00 UTC' +%-H 2>/dev/null) || _LP_S=14
+_LP_E=$(date -d '19:00 UTC' +%-H 2>/dev/null) || _LP_E=20
 
-if [ "${CURRENT_BYTES:-0}" != "${CACHED_BYTES:-0}" ] && [ "$CACHE_AGE" -ge "$TOTAL_COST_TTL" ] || [ -z "$TOTAL_COST_VAL" ]; then
-  # Lancer le calcul en background (non-bloquant)
-  (
-    set +e  # Eviter que pipefail tue le subshell si grep ne trouve rien
-    _TC=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f \
-      -exec grep -h '"output_tokens"' {} + 2>/dev/null | \
-      jq -c 'select(.type == "assistant" and .message.usage.output_tokens > 0) | [
-        .requestId, .message.usage.input_tokens, .message.usage.output_tokens,
-        (.message.usage.cache_creation_input_tokens // 0),
-        (.message.usage.cache_read_input_tokens // 0),
-        (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0),
-        (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0),
-        (if .message.usage.speed == "fast" then 6 else 1 end),
-        (.message.model // "unknown")
-      ]' 2>/dev/null | jq -sc '
-        group_by(.[0]) | map(last) |
-        map(
-          .[7] as $m | .[8] as $model |
-          if ($model | test("opus-4-[56]")) then
-            if $m == 6 then
-              (.[1]*30 + .[2]*150 + .[5]*37.5 + .[6]*60 + .[4]*3) / 1000000
-            else
-              (.[1]*5 + .[2]*25 + .[5]*6.25 + .[6]*10 + .[4]*0.5) / 1000000
-            end
-          elif ($model | test("opus")) then
-            (.[1]*15 + .[2]*75 + .[5]*18.75 + .[6]*30 + .[4]*1.5) / 1000000
-          elif ($model | test("haiku")) then
-            (.[1]*1 + .[2]*5 + .[5]*1.25 + .[6]*2 + .[4]*0.1) / 1000000
-          else
-            (.[1]*3 + .[2]*15 + .[5]*3.75 + .[6]*6 + .[4]*0.3) / 1000000
-          end
-        ) | add // 0 | . * 100 | round / 100
-      ')
-    _TB=$(find "$HOME/.claude/projects/" -name "*.jsonl" -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1}END{print s+0}')
-    echo "${_TC:-0}|${_TB}|$(date +%s)" > "$TOTAL_COST_CACHE" 2>/dev/null
-  ) &
-fi
+if [ "$_DOW" -ge 6 ] || { [ "$_DOW" -eq 5 ] && [ "$_UTC_H" -ge 19 ]; }; then
+  # --- Weekend (vendredi soir inclus) ---
+  _NC="$ACCENT"
+  _NL="WEEKEND"
+  _NI=""
+  case "$_DOW" in
+    5) _EL=$(( (_UTC_H - 19) * 60 + _UTC_M )) ;;
+    6) _EL=$(( (_UTC_H + 5) * 60 + _UTC_M )) ;;
+    7) _EL=$(( (_UTC_H + 29) * 60 + _UTC_M )) ;;
+  esac
+  _TT=3960  # 66h : ven 19h UTC → lun 13h UTC
+  _RM=$(( _TT - _EL ))
 
-# Formatage du cout total
-if [ -n "$TOTAL_COST_VAL" ] && [ "$TOTAL_COST_VAL" != "0" ]; then
-  TOTAL_INT=$(printf '%.0f' "$TOTAL_COST_VAL" 2>/dev/null) || TOTAL_INT=0
-  TOTAL_COST_FMT="\$${TOTAL_INT}"
-  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${CYAN}\xce\xa3") ${TOTAL_COST_FMT}$(printf '%b' "${RST}")"
+elif [ "$_UTC_H" -ge 13 ] && [ "$_UTC_H" -lt 19 ]; then
+  # --- Peak (nerfed) ---
+  _NC="$MUTED_FG"
+  _NL="NERFED"
+  _NI="${_LP_S}h-${_LP_E}h"
+  _EL=$(( (_UTC_H - 13) * 60 + _UTC_M ))
+  _TT=360   # 6h peak
+  _RM=$(( _TT - _EL ))
+
 else
-  TOTAL_COST_SEGMENT="$(printf '%b' "${DIM}${GRAY}\xce\xa3") ...$(printf '%b' "${RST}")"
+  # --- Off-peak (normal) ---
+  _NC="$ACCENT"
+  _NL="NORMAL"
+  _NI="${_LP_E}h-${_LP_S}h"
+  if [ "$_UTC_H" -ge 19 ]; then
+    _EL=$(( (_UTC_H - 19) * 60 + _UTC_M ))
+  else
+    _EL=$(( (_UTC_H + 5) * 60 + _UTC_M ))
+  fi
+  _TT=1080  # 18h off-peak
+  _RM=$(( _TT - _EL ))
+fi
+
+[ "$_RM" -lt 0 ] && _RM=0
+
+# Barre de progression 8 blocs
+_NP=$(( _EL * 100 / _TT ))
+[ "$_NP" -gt 100 ] && _NP=100
+_NF=$(( _NP * 8 / 100 ))
+[ "$_NF" -gt 8 ] && _NF=8
+_NE=$(( 8 - _NF ))
+_BF=""; _BE=""
+for ((i=0; i<_NF; i++)); do _BF+="█"; done
+for ((i=0; i<_NE; i++)); do _BE+="░"; done
+
+# Countdown formate
+_RD=$(( _RM / 1440 ))
+_RH=$(( (_RM % 1440) / 60 ))
+_RMN=$(( _RM % 60 ))
+if [ "$_RD" -gt 0 ]; then
+  _NCD="${_RD}j${_RH}h"
+else
+  _NCD="$(printf '%dh%02d' "$_RH" "$_RMN")"
+fi
+
+# Assemblage segment nerf
+if [ -n "$_NI" ]; then
+  NERF_SEGMENT="$(printf '%b' "${_NC}")${_NL}$(printf '%b' "${RST}") $(printf '%b' "${DIM}${GRAY}")${_NI}$(printf '%b' "${RST}") $(printf '%b' "${_NC}")${_BF}$(printf '%b' "${DIM}${GRAY}")${_BE}$(printf '%b' "${RST}") $(printf '%b' "${DIM}")${_NCD}$(printf '%b' "${RST}")"
+else
+  NERF_SEGMENT="$(printf '%b' "${_NC}")${_NL}$(printf '%b' "${RST}") $(printf '%b' "${_NC}")${_BF}$(printf '%b' "${DIM}${GRAY}")${_BE}$(printf '%b' "${RST}") $(printf '%b' "${DIM}")${_NCD}$(printf '%b' "${RST}")"
 fi
 
 # Assemblage ligne 2
-LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}$(printf '%b' "${SEP}")${TOTAL_COST_SEGMENT}"
+LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}$(printf '%b' "${SEP}")${NERF_SEGMENT}"
 
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
