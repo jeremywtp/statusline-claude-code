@@ -295,8 +295,8 @@ _PEAK_E_EP=$(TZ='America/Los_Angeles' date -d 'today 11:00' +%s 2>/dev/null) || 
 _LP_S=$(date -d "@$_PEAK_S_EP" +%-H 2>/dev/null) || _LP_S=14
 _LP_E=$(date -d "@$_PEAK_E_EP" +%-H 2>/dev/null) || _LP_E=20
 
-if [ "$_PT_DOW" -ge 6 ] || { [ "$_PT_DOW" -eq 5 ] && [ "$_PT_H" -ge 11 ]; } || { [ "$_PT_DOW" -eq 1 ] && [ "$_PT_H" -lt 5 ]; }; then
-  # --- Weekend (ven 11h PT → lun 5h PT = 66h) ---
+if [ "$_PT_DOW" -ge 6 ] || { [ "$_PT_DOW" -eq 5 ] && [ "$_PT_H" -ge 11 ]; }; then
+  # --- Weekend (ven 11h PT → dim 23h59 PT) ---
   _NC="$ACCENT"
   _NL="WEEKEND"
   _NI=""
@@ -304,9 +304,8 @@ if [ "$_PT_DOW" -ge 6 ] || { [ "$_PT_DOW" -eq 5 ] && [ "$_PT_H" -ge 11 ]; } || {
     5) _EL=$(( (_PT_H - 11) * 60 + _PT_M )) ;;
     6) _EL=$(( (_PT_H + 13) * 60 + _PT_M )) ;;
     7) _EL=$(( (_PT_H + 37) * 60 + _PT_M )) ;;
-    1) _EL=$(( (_PT_H + 61) * 60 + _PT_M )) ;;
   esac
-  _TT=3960  # 66h
+  _TT=3960  # 66h : ven 11h PT → lun 5h PT
   _RM=$(( _TT - _EL ))
 
 elif [ "$_PT_H" -ge 5 ] && [ "$_PT_H" -lt 11 ]; then
