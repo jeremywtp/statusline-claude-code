@@ -141,12 +141,31 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
+# Haiku : pas de barre | Opus 4.7 : 5 barres (avec xhigh) | autres : 4 barres
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
-case "$EFFORT_LEVEL" in
-  low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-  high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
-  max)     LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
-  *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+case "$MODEL_NAME" in
+  *Haiku*|*haiku*)
+    : # pas d'indicateur d'effort sur Haiku
+    ;;
+  *Opus*4.7*|*opus*4.7*)
+    # 5 niveaux : low, medium, high, xhigh, max
+    case "$EFFORT_LEVEL" in
+      low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      xhigh)   LINE1="${LINE1} $(printf '%b' "${ORANGE}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
+      max)     LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+    esac
+    ;;
+  *)
+    # 4 niveaux : low, medium, high, max (xhigh fallback sur high)
+    case "$EFFORT_LEVEL" in
+      low)         LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      high|xhigh)  LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
+      max)         LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      *)           LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+    esac
+    ;;
 esac
 
 # Agent (si present)
@@ -526,7 +545,7 @@ if usage_cache_stale && ! usage_in_backoff; then
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-[56]")) then
+          if (.model // "" | test("opus-4-[567]")) then
             if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
             else
@@ -562,7 +581,7 @@ if usage_cache_stale && ! usage_in_backoff; then
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-[56]")) then
+          if (.model // "" | test("opus-4-[567]")) then
             if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
             else

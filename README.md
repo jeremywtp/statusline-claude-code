@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
+Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
@@ -15,11 +15,10 @@ Opus 4.6 (1M context) ⚡ ▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2
 **Ligne 1 — Identite & Git**
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
-- Indicateur **effort level** en barres verticales (detection live via `<local-command-stdout>` dans le JSONL de session) :
-  - `▌░░░` low (cyan)
-  - `▌▌░░` medium/default (jaune)
-  - `▌▌▌░` high (rouge)
-  - `▌▌▌▌` max (magenta, Opus 4.6 uniquement)
+- Indicateur **effort level** en barres verticales (detection live via `<local-command-stdout>` dans le JSONL de session), adapte au modele :
+  - **Sonnet / Opus 4.5 / Opus 4.6** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
+  - **Opus 4.7** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max
+  - **Haiku** : pas d'indicateur (le modele n'a pas de niveau d'effort)
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
@@ -55,15 +54,17 @@ Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de 
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
 
-### Prix (USD / MTok) — Mars 2026
+### Prix (USD / MTok) — Avril 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
-| **Opus 4.6** | $5 | $25 | $6.25 | $10 | $0.50 |
+| **Opus 4.5 / 4.6 / 4.7** | $5 | $25 | $6.25 | $10 | $0.50 |
 | **Opus 4.6 Fast** | $30 | $150 | $37.50 | $60 | $3 |
 | **Sonnet 4.6** | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
 | Opus legacy | $15 | $75 | $18.75 | $30 | $1.50 |
+
+> Fast mode est disponible uniquement sur Opus 4.6 (pas sur 4.7).
 
 ### Session semaine alignee sur Anthropic
 
