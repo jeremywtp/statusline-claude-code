@@ -511,7 +511,9 @@ if usage_cache_stale && ! usage_in_backoff; then
       IFS='|' read -r STORED_RESET STORED_WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
       STORED_RESET_EPOCH=$(date -d "$STORED_RESET" +%s 2>/dev/null || echo 0)
 
-      if [ "$NOW_EPOCH" -ge "$STORED_RESET_EPOCH" ] || [ "$STORED_RESET_EPOCH" = "0" ]; then
+      # Regen si : (a) reset stocke depasse, (b) premier run, OU (c) l'API retourne
+      # un resets_at different (reset server-side anticipe par Anthropic).
+      if [ "$RESET_7D_RAW" != "$STORED_RESET" ] || [ "$NOW_EPOCH" -ge "$STORED_RESET_EPOCH" ] || [ "$STORED_RESET_EPOCH" = "0" ]; then
         WEEK_START=$(date -u -d "$RESET_7D_RAW - 7 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
         echo "${RESET_7D_RAW}|${WEEK_START}" > "$WEEK_SESSION_FILE" 2>/dev/null || true
       else
