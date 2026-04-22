@@ -1,0 +1,35 @@
+{
+  "name": "statusline-claude-code",
+  "version": "2.0.0",
+  "description": "Installer cross-platform (Linux/WSL + macOS) de la statusline Claude Code",
+  "type": "module",
+  "bin": {
+    "statusline-claude-code": "bin/install.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "statusline.sh",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeremywtp/statusline-claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jeremywtp/statusline-claude-code/issues"
+  },
+  "homepage": "https://github.com/jeremywtp/statusline-claude-code#readme",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "statusline",
+    "anthropic",
+    "cli",
+    "macos",
+    "linux",
+    "wsl"
+  ]
+}

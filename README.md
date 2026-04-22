@@ -96,27 +96,76 @@ Anthropic ajuste les limites de session 5h pendant les heures de pointe ([source
 
 Les thinking tokens sont inclus dans `output_tokens` sur le dernier chunk de streaming. Pas besoin de les compter separement.
 
-## Dependances
-
-- `jq` — parsing JSON
-- `curl` — appels API pour les quotas
-- `git` — branche et status
-
-```bash
-# Ubuntu/Debian
-sudo apt install -y jq curl git
-```
-
 ## Installation
 
-1. Copier le script :
+### Installation rapide (recommandee)
+
+Un installer cross-platform detecte l'OS et fait tout le necessaire :
 
 ```bash
-cp statusline.sh ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
+npx github:jeremywtp/statusline-claude-code
 ```
 
-2. Ajouter dans `~/.claude/settings.json` :
+Prerequis : Node 18+. L'installer :
+
+- copie `statusline.sh` vers `~/.claude/statusline.sh` (avec backup `.bak` horodate si un script existant est present)
+- merge proprement la cle `statusLine` dans `~/.claude/settings.json` sans casser les autres cles (`env`, `permissions`, `enabledPlugins`, etc.)
+- verifie / installe les dependances (`jq`, `curl`, `git`)
+- applique le **patch macOS complet** (voir plus bas) si OS = Darwin
+
+### Linux / WSL2
+
+Dependances attendues : `jq`, `curl`, `git`, `bash 4+`. L'installer refuse de continuer si l'une manque et propose la commande apt/pacman/dnf adaptee.
+
+```bash
+npx github:jeremywtp/statusline-claude-code
+```
+
+### macOS (Intel + Apple Silicon)
+
+Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `date -d`, `md5sum`, `grep -oP`, `flock`, et depend de Bash 5+). L'installer macOS :
+
+1. verifie Homebrew (refuse si absent et renvoie la commande d'install Homebrew)
+2. detecte Apple Silicon (`/opt/homebrew`) ou Intel (`/usr/local`)
+3. `brew install coreutils findutils grep bash jq curl git` pour ce qui manque seulement
+4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`md5sum`/`grep`/`find`/`flock` vers leurs equivalents GNU (`gstat`, `gdate`, `gmd5sum`, `ggrep`, `gfind`) et stub `flock` (inexistant sur macOS)
+5. reecrit le shebang vers Bash 5+ Homebrew (macOS livre `/bin/bash` en 3.2)
+
+Prerequis : avoir [Homebrew](https://brew.sh) installe (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`).
+
+```bash
+npx github:jeremywtp/statusline-claude-code
+```
+
+### Windows
+
+Pas de support natif (Claude Code et ses scripts bash ne tournent pas sur `cmd`/PowerShell). Installer [WSL2](https://learn.microsoft.com/fr-fr/windows/wsl/install) et lancer la commande depuis Ubuntu.
+
+### Commandes disponibles
+
+```bash
+# Install / update (re-run pour mettre a jour)
+npx github:jeremywtp/statusline-claude-code
+
+# Diagnostic : OS, dependances, fichiers, credentials
+npx github:jeremywtp/statusline-claude-code doctor
+
+# Desinstallation (retire statusline.sh et la cle statusLine)
+npx github:jeremywtp/statusline-claude-code uninstall
+
+# Options
+#   --no-backup   n'ecrit pas de .bak des fichiers modifies
+```
+
+### Installation manuelle (fallback)
+
+Si l'installer npx ne convient pas, voir `bin/platforms/linux.mjs` et `bin/shims/macos.sh` pour les etapes exactes — ou simplement :
+
+```bash
+cp statusline.sh ~/.claude/statusline.sh && chmod +x ~/.claude/statusline.sh
+```
+
+Puis ajouter dans `~/.claude/settings.json` :
 
 ```json
 {
@@ -128,7 +177,7 @@ chmod +x ~/.claude/statusline.sh
 }
 ```
 
-3. Redemarrer Claude Code.
+> Sur macOS, il faut **en plus** installer `coreutils findutils grep bash` via Homebrew et injecter le shim `bin/shims/macos.sh` apres `set -euo pipefail` — l'installer npx gere tout ca automatiquement.
 
 ## Fichiers et cache
 
