@@ -33,6 +33,9 @@ ORANGE='\033[38;5;208m'
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
 
+# --- Prefixe caches /tmp/ isole par UID (multi-user safe) ---
+_SL_PREFIX="/tmp/claude-sl-$(id -u 2>/dev/null || echo 0)"
+
 # --- Extraction JSON en un seul appel jq ---
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
@@ -73,7 +76,7 @@ esac
 # ============================================================================
 # GIT : cache par repertoire avec TTL de 5 secondes
 # ============================================================================
-GIT_CACHE_KEY="/tmp/claude-sl-git-$(echo "$DIR" | md5sum 2>/dev/null | cut -d' ' -f1 || echo 'default')"
+GIT_CACHE_KEY="${_SL_PREFIX}-git-$(printf '%s' "$DIR" | cksum 2>/dev/null | cut -d' ' -f1 || echo 'default')"
 GIT_CACHE_TTL=5
 
 git_cache_stale() {
@@ -197,7 +200,7 @@ LINE1="${LINE1}${GIT_SEGMENT}"
 LINE1="${LINE1}$(printf '%b' "${SEP}${DIM}${GRAY}")v${VERSION}$(printf '%b' "${RST}")"
 
 # Status Claude (status.claude.com — cache 60s)
-STATUS_CACHE="/tmp/claude-sl-status-cache"
+STATUS_CACHE="${_SL_PREFIX}-status-cache"
 STATUS_CACHE_TTL=60
 
 _status_stale() {
@@ -395,11 +398,11 @@ LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${S
 # Source : /api/oauth/usage — donnees officielles du plan Max20
 # Cache dans /tmp avec TTL de 300s + backoff 600s sur 429 + flock multi-instances
 # ============================================================================
-USAGE_CACHE="/tmp/claude-sl-usage-cache"
+USAGE_CACHE="${_SL_PREFIX}-usage-cache"
 USAGE_CACHE_TTL=300
-USAGE_BACKOFF_FILE="/tmp/claude-sl-usage-backoff"
+USAGE_BACKOFF_FILE="${_SL_PREFIX}-usage-backoff"
 USAGE_BACKOFF_TTL=600
-USAGE_LOCK="/tmp/claude-sl-usage.lock"
+USAGE_LOCK="${_SL_PREFIX}-usage.lock"
 USAGE_SESSION_FILE="$HOME/.claude/usage-session"
 
 usage_cache_stale() {
@@ -435,7 +438,7 @@ if usage_cache_stale && ! usage_in_backoff; then
 
   _fetch_usage() {
     local _tmp_file
-    _tmp_file=$(mktemp /tmp/claude-sl-api-XXXXXX)
+    _tmp_file=$(mktemp "${_SL_PREFIX}-api-XXXXXX")
     API_HTTP=$(curl -s --max-time 5 -o "$_tmp_file" -w "%{http_code}" \
       -H "Accept: application/json" \
       -H "Content-Type: application/json" \
@@ -534,7 +537,7 @@ if usage_cache_stale && ! usage_in_backoff; then
   fi
 
   if [ -n "$WEEK_START" ]; then
-    WEEK_TMP="/tmp/claude-sl-week-raw.jsonl"
+    WEEK_TMP="${_SL_PREFIX}-week-raw.jsonl"
     find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 -exec \
       jq -c --arg tw "$WEEK_START" \
         'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |

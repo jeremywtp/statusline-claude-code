@@ -41,9 +41,10 @@ function mergeSettings() {
     }
   }
   json.statusLine = {
+    padding: 1,
+    ...(json.statusLine || {}),
     type: 'command',
     command: '~/.claude/statusline.sh',
-    padding: 1,
   };
   writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
 }
@@ -96,7 +97,7 @@ export async function install({ statuslineSrc, flags }) {
   log.info('');
   log.info(`${C.dim}Tester manuellement :${C.reset}`);
   log.info(
-    `  echo '{"model":"claude-opus-4-7","cost":{"totalCostUsd":0},"session":{}}' | ${STATUSLINE_DST}`
+    `  echo '{"model":{"display_name":"Opus 4.7"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
   );
   log.info('');
 }
