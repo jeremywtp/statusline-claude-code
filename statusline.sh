@@ -127,14 +127,22 @@ _SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "def
 FAST_MODE="${_SETTINGS%%|*}"
 EFFORT_LEVEL="${_SETTINGS#*|}"
 # 2) Effort reel : lire le JSONL de session (capture le choix via /effort ou /model)
-#    Filtre sur <local-command-stdout> pour ignorer le contenu des messages assistant
-#    Priorite : "Set effort level to X" > "Effort level: X" > settings.json
+#    Priorite : env var CLAUDE_CODE_EFFORT_LEVEL > JSONL > settings.json
+#    Le lookahead exige </local-command-stdout> a moins de 50 chars : evite les
+#    faux positifs quand le code source du statusline (ou un grep de debug) est
+#    lu via Read et stocke dans le JSONL — ces occurrences n'ont pas la balise
+#    fermante immediate. Bloque aussi les "Not applied:" du /effort overrid (env var).
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  # Pattern 1 : "<local-command-stdout>Set effort level to max (this session only)"
-  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
-  # Pattern 2 : "<local-command-stdout>Effort level: auto" ou "Current effort level: medium"
-  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+  # Pattern 1 : balise local-command-stdout contenant "Set effort level to max (this session only)"
+  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
+  # Pattern 2 : balise local-command-stdout contenant "Effort level: auto" ou "Current effort level: medium"
+  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
   [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
+fi
+# 3) Env var CLAUDE_CODE_EFFORT_LEVEL : override absolu (Claude Code l'honore en priorite,
+#    le /effort renvoie "Not applied: ... overrides effort this session" quand elle est posee)
+if [ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]; then
+  EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
 fi
 if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
