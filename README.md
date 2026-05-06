@@ -6,7 +6,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ```
 Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 ↓1 │ v2.1.75 ●
-██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
+██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -35,7 +35,6 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 �
 **Ligne 2 — Contexte & Session**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
 - Cout de la session courante (USD)
-- Lignes ajoutees/supprimees
 - Duree de la session
 - **Indicateur peak/off-peak** — heures de pointe Anthropic (lun-ven 13h-19h UTC) :
   - `NORMAL` (terracotta) — off-peak, limites 5h normales

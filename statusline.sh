@@ -47,8 +47,7 @@ _SL_PREFIX="/tmp/claude-sl-$(id -u 2>/dev/null || echo 0)"
 # --- Extraction JSON en un seul appel jq ---
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
-MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0
-LINES_ADD=0; LINES_REM=0; CTX_PCT=0
+MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0; CTX_PCT=0
 AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""
 
 _JQ_OUT=$(echo "$INPUT" | jq -r '
@@ -57,8 +56,6 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "VERSION=\(.version // "---")",
   @sh "COST=\(.cost.total_cost_usd // 0)",
   @sh "DURATION_MS=\(.cost.total_duration_ms // 0)",
-  @sh "LINES_ADD=\(.cost.total_lines_added // 0)",
-  @sh "LINES_REM=\(.cost.total_lines_removed // 0)",
   @sh "CTX_PCT=\(.context_window.used_percentage // 0)",
   @sh "AGENT_NAME=\(.agent.name // "")",
   @sh "VIM_MODE=\(.vim.mode // "")",
@@ -330,13 +327,6 @@ BAR_SEGMENT="$(printf '%b' "${BAR_COLOR}")${BAR_FILLED}$(printf '%b' "${DIM}${GR
 COST_FMT=$(printf '$%.2f' "$COST" 2>/dev/null) || COST_FMT='$0.00'
 SESSION_SEGMENT="$(printf '%b' "${YELLOW}")${COST_FMT}$(printf '%b' "${RST}")"
 
-# --- Lignes ajoutees/supprimees ---
-if [ "$LINES_ADD" -gt 0 ] 2>/dev/null || [ "$LINES_REM" -gt 0 ] 2>/dev/null; then
-  LINES_SEGMENT="$(printf '%b' "${BGREEN}")+${LINES_ADD}$(printf '%b' "${RST}") $(printf '%b' "${BRED}")-${LINES_REM}$(printf '%b' "${RST}")"
-else
-  LINES_SEGMENT="$(printf '%b' "${DIM}${GRAY}")+0 -0$(printf '%b' "${RST}")"
-fi
-
 # --- Duree de session ---
 DURATION_MS=${DURATION_MS%.*}
 DURATION_SEC=$((DURATION_MS / 1000))
@@ -434,7 +424,7 @@ else
 fi
 
 # Assemblage ligne 2
-LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${LINES_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}$(printf '%b' "${SEP}")${NERF_SEGMENT}"
+LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}$(printf '%b' "${SEP}")${NERF_SEGMENT}"
 
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
