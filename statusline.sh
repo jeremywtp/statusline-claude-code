@@ -99,6 +99,8 @@ GIT_BRANCH=""
 GIT_STAGED=0
 GIT_MODIFIED=0
 GIT_UNTRACKED=0
+GIT_AHEAD=0
+GIT_BEHIND=0
 GIT_AVAILABLE=false
 
 if git_cache_stale; then
@@ -107,11 +109,38 @@ if git_cache_stale; then
     GIT_STAGED=$(git -C "$DIR" --no-optional-locks diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')
     GIT_MODIFIED=$(git -C "$DIR" --no-optional-locks diff --name-only 2>/dev/null | wc -l | tr -d ' ')
     GIT_UNTRACKED=$(git -C "$DIR" --no-optional-locks ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+    # Ahead/behind vs upstream tracke (silencieux si pas d'upstream)
+    if git -C "$DIR" --no-optional-locks rev-parse --abbrev-ref '@{u}' > /dev/null 2>&1; then
+      read -r GIT_AHEAD GIT_BEHIND < <(git -C "$DIR" --no-optional-locks rev-list --left-right --count HEAD...@{u} 2>/dev/null) || true
+      GIT_AHEAD=${GIT_AHEAD:-0}
+      GIT_BEHIND=${GIT_BEHIND:-0}
+    fi
     GIT_AVAILABLE=true
   fi
-  echo "${GIT_AVAILABLE}|${GIT_BRANCH}|${GIT_STAGED}|${GIT_MODIFIED}|${GIT_UNTRACKED}" > "$GIT_CACHE_KEY" 2>/dev/null || true
+  echo "${GIT_AVAILABLE}|${GIT_BRANCH}|${GIT_STAGED}|${GIT_MODIFIED}|${GIT_UNTRACKED}|${GIT_AHEAD}|${GIT_BEHIND}" > "$GIT_CACHE_KEY" 2>/dev/null || true
 else
-  IFS='|' read -r GIT_AVAILABLE GIT_BRANCH GIT_STAGED GIT_MODIFIED GIT_UNTRACKED < "$GIT_CACHE_KEY" 2>/dev/null || true
+  IFS='|' read -r GIT_AVAILABLE GIT_BRANCH GIT_STAGED GIT_MODIFIED GIT_UNTRACKED GIT_AHEAD GIT_BEHIND < "$GIT_CACHE_KEY" 2>/dev/null || true
+  GIT_AHEAD=${GIT_AHEAD:-0}
+  GIT_BEHIND=${GIT_BEHIND:-0}
+fi
+
+# --- Auto-fetch background ---
+# Si > 5 min depuis le dernier fetch ET upstream tracke, lance "git fetch" en
+# detache. Le rendu n'attend pas (& disown). Lock par repo via cksum du DIR.
+FETCH_LOCK="${_SL_PREFIX}-fetch-$(printf '%s' "$DIR" | cksum 2>/dev/null | cut -d' ' -f1 || echo 'default')"
+FETCH_TTL=300
+fetch_stale() {
+  [ ! -f "$FETCH_LOCK" ] && return 0
+  local now age
+  now=$(date +%s)
+  age=$(stat -c %Y "$FETCH_LOCK" 2>/dev/null || echo 0)
+  [ $((now - age)) -gt "$FETCH_TTL" ]
+}
+if [ "$GIT_AVAILABLE" = "true" ] && fetch_stale; then
+  if git -C "$DIR" --no-optional-locks rev-parse --abbrev-ref '@{u}' > /dev/null 2>&1; then
+    touch "$FETCH_LOCK" 2>/dev/null || true
+    ( git -C "$DIR" --no-optional-locks fetch --quiet --no-tags 2>/dev/null ) & disown 2>/dev/null || true
+  fi
 fi
 
 # --- Segment git ---
@@ -123,6 +152,8 @@ if [ "$GIT_AVAILABLE" = "true" ] && [ -n "$GIT_BRANCH" ]; then
   [ "$GIT_STAGED" -gt 0 ] 2>/dev/null && GIT_PARTS="${GIT_PARTS}$(printf '%b' " ${BGREEN}+${GIT_STAGED}${RST}")"
   [ "$GIT_MODIFIED" -gt 0 ] 2>/dev/null && GIT_PARTS="${GIT_PARTS}$(printf '%b' " ${BYELLOW}~${GIT_MODIFIED}${RST}")"
   [ "$GIT_UNTRACKED" -gt 0 ] 2>/dev/null && GIT_PARTS="${GIT_PARTS}$(printf '%b' " ${RED}?${GIT_UNTRACKED}${RST}")"
+  [ "$GIT_AHEAD" -gt 0 ] 2>/dev/null && GIT_PARTS="${GIT_PARTS}$(printf '%b' " ${CYAN}↑${GIT_AHEAD}${RST}")"
+  [ "$GIT_BEHIND" -gt 0 ] 2>/dev/null && GIT_PARTS="${GIT_PARTS}$(printf '%b' " ${BYELLOW}↓${GIT_BEHIND}${RST}")"
 
   [ -n "$GIT_PARTS" ] && GIT_SEGMENT="${GIT_SEGMENT}${GIT_PARTS}"
 fi

@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.1.75 ●
+Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 ↓1 │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ +45 -12 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
@@ -22,7 +22,8 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 │ v2.
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
-- Branche git avec fichiers staged (`+`), modifies (`~`), et untracked (`?`)
+- Branche git avec fichiers staged (`+`), modifies (`~`), untracked (`?`), commits non pousses (`↑` cyan) et commits remote non recuperes (`↓` jaune)
+- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (`& disown`) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-*-fetch-*`)
 - Version de Claude Code
 - Indicateur **status Claude** via [status.claude.com](https://status.claude.com) (API `summary.json`, cache 60s) :
   - `●` vert — Operational
@@ -180,6 +181,33 @@ Puis ajouter dans `~/.claude/settings.json` :
 
 > Sur macOS, il faut **en plus** installer `coreutils findutils grep bash` via Homebrew et injecter le shim `bin/shims/macos.sh` apres `set -euo pipefail` — l'installer npx gere tout ca automatiquement.
 
+### Hook `UserPromptSubmit` (optionnel — pour `↓N` plus reactif)
+
+Le statusline lance deja un `git fetch` en background si > 5 min depuis le dernier. Pour rendre `↓N` (commits remote non recuperes) plus reactif, on peut ajouter un hook qui declenche un fetch detache a chaque message envoye :
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "(cd \"$CLAUDE_PROJECT_DIR\" && git rev-parse --git-dir >/dev/null 2>&1 && git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 && git fetch --quiet --no-tags 2>/dev/null) & disown"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+A merger dans `~/.claude/settings.json`. La double verification (`rev-parse --git-dir` + `rev-parse --abbrev-ref @{u}`) evite :
+- d'erreurer dans les dossiers non-git
+- de prompter SSH/HTTPS inutilement sur les branches sans upstream tracke
+
+Le `& disown` detache le fetch du processus parent : il **ne bloque jamais** l'envoi du message.
+
 ## Fichiers et cache
 
 | Fichier | Description | TTL |
@@ -191,7 +219,8 @@ Puis ajouter dans `~/.claude/settings.json` :
 | `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j, 7 champs) | 300s |
 | `/tmp/claude-sl-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
 | `/tmp/claude-sl-usage.lock` | Flock — un seul appel API a la fois (multi-instances) | — |
-| `/tmp/claude-sl-git-*` | Cache git status (par repertoire) | 5s |
+| `/tmp/claude-sl-git-*` | Cache git status par repertoire (incl. `↑N ↓N` ahead/behind) | 5s |
+| `/tmp/claude-sl-fetch-*` | Lock auto-fetch par repertoire — empeche les fetch trop frequents | 300s |
 | `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
 
 ## Resilience API
