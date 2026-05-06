@@ -59,9 +59,14 @@ export function cmdOutput(cmd) {
 // ============================================================================
 // Hook UserPromptSubmit "git fetch" — gestion idempotente
 // ============================================================================
-// Le hook lance un "git fetch --quiet --no-tags" detache (& disown) a chaque
+// Le hook lance un "git fetch --quiet --no-tags" detache en background a chaque
 // message envoye, pour que la statusline affiche un ↓N a jour. Optionnel,
 // propose lors de l'install via prompt TTY.
+//
+// Note POSIX : on utilise ">/dev/null 2>&1 &" et NON "& disown". Claude Code
+// execute les hooks via /bin/sh, qui sur Debian/Ubuntu/WSL2 est un lien vers
+// dash — dash n'a pas le builtin "disown" (specifique a bash/zsh). La
+// redirection des 3 FDs + & suffit a detacher le subprocess sans SIGHUP.
 // ============================================================================
 
 // Marqueur shell unique pour identifier notre hook lors des re-installs et
@@ -71,11 +76,12 @@ export const FETCH_HOOK_MARKER = '# scc-fetch-hook';
 export const FETCH_HOOK_COMMAND =
   '(cd "$CLAUDE_PROJECT_DIR" && git rev-parse --git-dir >/dev/null 2>&1 && ' +
   "git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 && " +
-  'git fetch --quiet --no-tags 2>/dev/null) & disown ' +
+  'git fetch --quiet --no-tags 2>/dev/null) </dev/null >/dev/null 2>&1 & ' +
   FETCH_HOOK_MARKER;
 
 // Detection : matche le marqueur exact OU une signature heuristique (retro-
-// compat pour les anciennes installs sans marqueur).
+// compat pour les anciennes installs sans marqueur, y compris les versions
+// "& disown" pre-migration POSIX).
 function _isOurHookCommand(cmd) {
   if (typeof cmd !== 'string') return false;
   if (cmd.includes(FETCH_HOOK_MARKER)) return true;
@@ -93,6 +99,20 @@ export function hasFetchHook(settingsJson) {
   return false;
 }
 
+// Retourne true UNIQUEMENT si la commande installee est exactement la version
+// courante. Utilise par l'installeur pour detecter une vieille install (ex:
+// "& disown") qu'il faut migrer.
+export function isLatestFetchHook(settingsJson) {
+  const hooks = settingsJson?.hooks?.UserPromptSubmit;
+  if (!Array.isArray(hooks)) return false;
+  for (const matcher of hooks) {
+    const inner = matcher?.hooks;
+    if (!Array.isArray(inner)) continue;
+    if (inner.some((h) => h?.command === FETCH_HOOK_COMMAND)) return true;
+  }
+  return false;
+}
+
 export function addFetchHook(settingsJson) {
   if (hasFetchHook(settingsJson)) return false;
   if (!settingsJson.hooks) settingsJson.hooks = {};
@@ -100,6 +120,16 @@ export function addFetchHook(settingsJson) {
   settingsJson.hooks.UserPromptSubmit.push({
     hooks: [{ type: 'command', command: FETCH_HOOK_COMMAND }],
   });
+  return true;
+}
+
+// Migre une install existante vers la version courante de la commande.
+// Retourne true si une migration a eu lieu, false sinon.
+export function migrateFetchHook(settingsJson) {
+  if (!hasFetchHook(settingsJson)) return false;
+  if (isLatestFetchHook(settingsJson)) return false;
+  removeFetchHook(settingsJson);
+  addFetchHook(settingsJson);
   return true;
 }
 

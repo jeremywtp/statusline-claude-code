@@ -22,8 +22,10 @@ import {
   backup,
   cmdOutput,
   hasFetchHook,
+  isLatestFetchHook,
   addFetchHook,
   removeFetchHook,
+  migrateFetchHook,
   promptYesNo,
 } from '../lib.mjs';
 
@@ -68,8 +70,15 @@ async function maybeInstallFetchHook(flags) {
     json = {};
   }
   if (hasFetchHook(json)) {
-    log.ok('Hook deja present (idempotent)');
-    return;
+    if (isLatestFetchHook(json)) {
+      log.ok('Hook deja present (idempotent)');
+      return;
+    }
+    if (migrateFetchHook(json)) {
+      writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
+      log.ok('Hook scc-fetch-hook migre (& disown -> POSIX & detach)');
+      return;
+    }
   }
   let want;
   if (flags.withFetchHook) {
@@ -77,7 +86,7 @@ async function maybeInstallFetchHook(flags) {
   } else if (flags.noFetchHook) {
     want = false;
   } else {
-    log.info(`  ${C.dim}Lance "git fetch --quiet --no-tags" detache (& disown) a chaque message${C.reset}`);
+    log.info(`  ${C.dim}Lance "git fetch --quiet --no-tags" detache (background POSIX) a chaque message${C.reset}`);
     log.info(`  ${C.dim}envoye, pour rendre ↓N (commits remote non recuperes) plus reactif.${C.reset}`);
     log.info(`  ${C.dim}Sans le hook, l'auto-fetch tourne quand meme toutes les 5 min.${C.reset}`);
     log.info('');
