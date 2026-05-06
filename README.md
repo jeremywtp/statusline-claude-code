@@ -219,16 +219,18 @@ Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour evi
 - **Token OAuth** — sur macOS, lu dans le Keychain `Claude Code-credentials` ; sur Linux/WSL, lu dans `~/.claude/.credentials.json`. La lecture essaie le fichier en priorite et tombe sur le Keychain si vide ET `uname = Darwin`
 - **Couleurs** — toutes les couleurs sont en palette 256 (codes `\033[38;5;N` avec N >= 16) pour garantir un rendu identique sur tous les terminaux. Les codes 16-couleurs (30-37 / 90-97) sont remappes par certains terminaux (cmux, Solarized, etc.) ce qui faisait ressortir le vert en jaune et le violet en violet pale
 
-### Effort level "max" sur Claude Code 2.1.x
+### Effort level — sources et priorite
 
-Comportement observe sur Claude Code 2.1.131 (Opus 4.7) : `max` ne peut PAS etre defini de maniere persistante. Ni `effortLevel: "max"` dans `~/.claude/settings.json`, ni la variable d'env `CLAUDE_CODE_EFFORT_LEVEL=max` ne sont chargees au demarrage de session — Claude Code plafonne au defaut modele (`xhigh` sur Opus 4.7). C'est un garde-fou intentionnel : `max` consomme beaucoup de tokens, et son activation est limitee a `this session only`.
+Claude Code applique l'effort level dans cet ordre (le premier qui matche gagne) :
 
-**Pour vraiment activer `max`** : taper `/effort max` dans l'UI a chaque demarrage de session.
+1. **`CLAUDE_CODE_EFFORT_LEVEL` env var** — override absolu. Quand elle est posee, `/effort <X>` UI est bloquee : Claude Code repond `CLAUDE_CODE_EFFORT_LEVEL=<X> overrides this session — clear it and <Y> takes over`.
+2. **`/effort <X>` UI dans la session courante** — override session-only.
+3. **`effortLevel` dans `~/.claude/settings.json`** — baseline persistante.
+4. **Defaut modele** — `xhigh` sur Opus 4.7, `medium` ailleurs.
 
-La statusline reflete ce comportement :
-1. Lecture de `effortLevel` dans `settings.json` comme baseline. Si `"max"`, clamp au defaut modele (xhigh sur Opus 4.7, high ailleurs).
-2. Override via le JSONL de session (`local-command-stdout` contenant `Set effort level to <X>`) qui capture le `/effort` UI — c'est la seule source qui peut afficher `max`.
-3. La variable d'env `CLAUDE_CODE_EFFORT_LEVEL` n'est plus utilisee : elle n'est pas honoree par Claude Code 2.1.x (testee). Garder la pour la statusline produirait un faux positif visuel.
+La statusline suit la meme priorite : env var > JSONL `/effort` > settings.json > defaut.
+
+**Detail technique du pattern grep `/effort`** : la statusline detecte les changements `/effort` UI en grep-ant le JSONL de session pour `Set effort level to <X> (this session only)`. Le marqueur `(this session only)` est utilise comme lookahead fiable, au lieu d'un lookahead a longueur fixe qui ratait specifiquement le suffixe long de `max` (`Set effort level to max (this session only): Maximum capability with deepest reasoning` — 63 chars de suffixe, contre ~40 pour les autres niveaux).
 
 ## Licence
 
