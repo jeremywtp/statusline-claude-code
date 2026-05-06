@@ -137,17 +137,18 @@ LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 _SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
 FAST_MODE="${_SETTINGS%%|*}"
 EFFORT_LEVEL="${_SETTINGS#*|}"
-# 2) Effort reel via JSONL — capture le choix via /effort ou /model (incl. max).
-#    Le lookahead utilise "(this session only)" comme marqueur fiable de fin :
-#    a) anti-faux-positif (le code source du statusline lu via Read et stocke
-#       dans le JSONL n'a pas cette string a proximite),
-#    b) tolere les descriptions longues comme "Set effort level to max (this
-#       session only): Maximum capability with deepest reasoning" — un lookahead
-#       a longueur fixe (50 chars) ratait specifiquement le suffixe de "max"
-#       qui depasse les autres niveaux.
+# 2) Effort reel via JSONL — capture le choix via /effort ou /model.
+#    Claude Code ecrit deux formats distincts dans local-command-stdout selon
+#    que le niveau est persistant ou session-only :
+#      - low/medium/high/xhigh : "Set effort level to <X>: <description>"
+#      - max                   : "Set effort level to max (this session only): <description>"
+#    Le pattern doit donc tolerer un suffixe variable. Lookahead 200 chars sur
+#    </local-command-stdout> couvre toutes les descriptions (jusqu'a ~95 chars
+#    pour high) tout en restant anti-faux-positif (le code source lu via Read
+#    n'a pas </local-command-stdout> a proximite immediate).
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  # Pattern 1 : "Set effort level to <X> (this session only)"
-  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?= \(this session only\))' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
+  # Pattern 1 : "Set effort level to <X>" (les 2 formats)
+  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
   # Pattern 2 : "Effort level: auto" ou "Current effort level: medium"
   [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
   [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"

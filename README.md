@@ -230,7 +230,18 @@ Claude Code applique l'effort level dans cet ordre (le premier qui matche gagne)
 
 La statusline suit la meme priorite : env var > JSONL `/effort` > settings.json > defaut.
 
-**Detail technique du pattern grep `/effort`** : la statusline detecte les changements `/effort` UI en grep-ant le JSONL de session pour `Set effort level to <X> (this session only)`. Le marqueur `(this session only)` est utilise comme lookahead fiable, au lieu d'un lookahead a longueur fixe qui ratait specifiquement le suffixe long de `max` (`Set effort level to max (this session only): Maximum capability with deepest reasoning` — 63 chars de suffixe, contre ~40 pour les autres niveaux).
+**Detail technique du pattern grep `/effort`** : Claude Code ecrit deux formats distincts dans `local-command-stdout` selon que le niveau est persistant ou session-only :
+
+- `low` / `medium` / `high` / `xhigh` (persistants) → `Set effort level to <X>: <description>`
+- `max` (session-only) → `Set effort level to max (this session only): <description>`
+
+Le pattern doit donc tolerer un suffixe variable :
+
+```
+local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-stdout>)
+```
+
+Le lookahead 200 chars couvre toutes les descriptions (jusqu'a ~95 chars pour `high`) tout en restant anti-faux-positif (le code source du statusline lu via Read et stocke dans le JSONL n'a pas `</local-command-stdout>` a proximite immediate).
 
 ## Licence
 
