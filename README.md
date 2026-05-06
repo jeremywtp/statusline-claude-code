@@ -130,6 +130,7 @@ Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `dat
 3. `brew install coreutils findutils grep bash jq curl git` pour ce qui manque seulement
 4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`md5sum`/`grep`/`find`/`flock` vers leurs equivalents GNU (`gstat`, `gdate`, `gmd5sum`, `ggrep`, `gfind`) et stub `flock` (inexistant sur macOS)
 5. reecrit le shebang vers Bash 5+ Homebrew (macOS livre `/bin/bash` en 3.2)
+6. lit le token OAuth dans le **Keychain** (`security find-generic-password -s "Claude Code-credentials"`) en fallback de `~/.claude/.credentials.json` — Claude Code stocke le token dans le Keychain par defaut sur Mac, alors que sur Linux/WSL il l'ecrit dans le fichier
 
 Prerequis : avoir [Homebrew](https://brew.sh) installe (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`).
 
@@ -211,6 +212,11 @@ Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
 Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse avec `jq` pour extraire les infos du modele, du contexte, de la session et du git.
 
 Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (300s) en scannant les fichiers JSONL du repertoire `~/.claude/projects/` (batch `find -exec +` pour performance).
+
+## Compatibilite
+
+- **Locale** — le script force `LC_NUMERIC=C` au demarrage pour que `printf '%.Nf'` accepte les valeurs avec `.` (sans ca, en `fr_FR.UTF-8` qui attend `,`, tous les pourcentages et couts retombent a 0)
+- **Token OAuth** — sur macOS, lu dans le Keychain `Claude Code-credentials` ; sur Linux/WSL, lu dans `~/.claude/.credentials.json`. La lecture essaie le fichier en priorite et tombe sur le Keychain si vide ET `uname = Darwin`
 
 ## Licence
 

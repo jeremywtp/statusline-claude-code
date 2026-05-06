@@ -7,6 +7,10 @@
 # ============================================================================
 set -euo pipefail
 
+# Forcer le separateur decimal "." pour printf '%.Nf' (sinon echec en locale fr_FR
+# qui attend "8,0" et fait tomber tous les pourcentages/couts a 0).
+export LC_NUMERIC=C
+
 # --- Lecture du JSON stdin (une seule fois) ---
 INPUT=$(cat)
 
@@ -432,7 +436,18 @@ if usage_cache_stale && ! usage_in_backoff; then
   fi
 
   # --- Appel API OAuth usage (flock : un seul process a la fois) ---
-  OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
+  # Source du token : .credentials.json (Linux/WSL) ou Keychain (defaut macOS).
+  OAUTH_TOKEN=""
+  if [ -f "$HOME/.claude/.credentials.json" ]; then
+    OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
+  fi
+  if [ -z "$OAUTH_TOKEN" ] && [ "$(uname)" = "Darwin" ]; then
+    # Claude Code stocke le token dans le Keychain par defaut sur macOS.
+    _KC_JSON=$(security find-generic-password -s "Claude Code-credentials" -a "$USER" -w 2>/dev/null) || _KC_JSON=""
+    if [ -n "$_KC_JSON" ]; then
+      OAUTH_TOKEN=$(printf '%s' "$_KC_JSON" | jq -r '.claudeAiOauth.accessToken // ""' 2>/dev/null) || OAUTH_TOKEN=""
+    fi
+  fi
   API_RESP=""
   API_HTTP=0
 

@@ -297,6 +297,19 @@ export async function doctor() {
 
   log.step('\nCredentials (OAuth usage)');
   const creds = join(CLAUDE_DIR, '.credentials.json');
-  if (existsSync(creds)) log.ok('.credentials.json present');
-  else log.warn(".credentials.json absent - les quotas 5h/7j ne s'afficheront pas");
+  if (existsSync(creds)) {
+    log.ok('.credentials.json present');
+  } else {
+    // Sur macOS, Claude Code stocke par defaut le token dans le Keychain.
+    const user = process.env.USER || process.env.LOGNAME || '';
+    try {
+      execSync(
+        `security find-generic-password -s "Claude Code-credentials" -a "${user}" -w`,
+        { stdio: 'pipe' }
+      );
+      log.ok('Keychain "Claude Code-credentials" present');
+    } catch {
+      log.warn(".credentials.json + Keychain absents - les quotas 5h/7j ne s'afficheront pas");
+    }
+  }
 }
