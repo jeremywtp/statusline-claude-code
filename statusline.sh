@@ -15,23 +15,27 @@ export LC_NUMERIC=C
 INPUT=$(cat)
 
 # --- Couleurs ANSI ---
+# Palette 256 (codes >= 16) pour un rendu identique sur tous les terminaux.
+# Les codes 16-couleurs (30-37 / 90-97) sont remappes par certains terminaux
+# (cmux, Solarized, etc.) ce qui faisait ressortir le vert en jaune et le
+# violet en violet pale. Les codes 256 sont fixes, pas configurables.
 RST='\033[0m'
 BOLD='\033[1m'
 DIM='\033[2m'
 
-RED='\033[31m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-BLUE='\033[34m'
-MAGENTA='\033[35m'
-CYAN='\033[36m'
-WHITE='\033[37m'
-GRAY='\033[90m'
+RED='\033[38;5;196m'
+GREEN='\033[38;5;40m'
+YELLOW='\033[38;5;220m'
+BLUE='\033[38;5;33m'
+MAGENTA='\033[38;5;129m'
+CYAN='\033[38;5;39m'
+WHITE='\033[38;5;255m'
+GRAY='\033[38;5;244m'
 
-BRED='\033[91m'
-BGREEN='\033[92m'
-BYELLOW='\033[93m'
-BCYAN='\033[96m'
+BRED='\033[38;5;203m'
+BGREEN='\033[38;5;82m'
+BYELLOW='\033[38;5;227m'
+BCYAN='\033[38;5;51m'
 ORANGE='\033[38;5;208m'
 
 # --- Separateur fin │ ---

@@ -217,6 +217,7 @@ Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour evi
 
 - **Locale** — le script force `LC_NUMERIC=C` au demarrage pour que `printf '%.Nf'` accepte les valeurs avec `.` (sans ca, en `fr_FR.UTF-8` qui attend `,`, tous les pourcentages et couts retombent a 0)
 - **Token OAuth** — sur macOS, lu dans le Keychain `Claude Code-credentials` ; sur Linux/WSL, lu dans `~/.claude/.credentials.json`. La lecture essaie le fichier en priorite et tombe sur le Keychain si vide ET `uname = Darwin`
+- **Couleurs** — toutes les couleurs sont en palette 256 (codes `\033[38;5;N` avec N >= 16) pour garantir un rendu identique sur tous les terminaux. Les codes 16-couleurs (30-37 / 90-97) sont remappes par certains terminaux (cmux, Solarized, etc.) ce qui faisait ressortir le vert en jaune et le violet en violet pale
 
 ## Licence
 
