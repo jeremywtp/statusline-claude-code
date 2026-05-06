@@ -133,16 +133,27 @@ fi
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
 # Indicateurs Fast mode + Effort level
-# 1) settings.json pour fastMode et effortLevel persistant
+# 1) settings.json — base de l'effort persistant
 _SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
 FAST_MODE="${_SETTINGS%%|*}"
 EFFORT_LEVEL="${_SETTINGS#*|}"
-# 2) Effort reel : lire le JSONL de session (capture le choix via /effort ou /model)
-#    Priorite : env var CLAUDE_CODE_EFFORT_LEVEL > JSONL > settings.json
+# Claude Code (>= 2.1) ne charge PAS "max" depuis settings.json ni depuis l'env var
+# CLAUDE_CODE_EFFORT_LEVEL au demarrage de session : il plafonne au defaut modele.
+# "max" requiert une activation explicite via "/effort max" UI a chaque session
+# ("this session only", garde-fou tokens). On clamp donc "max" au defaut modele
+# (xhigh sur Opus 4.7, high ailleurs) pour refleter l'effort reellement applique.
+if [ "$EFFORT_LEVEL" = "max" ]; then
+  case "$MODEL_NAME" in
+    *Opus*4.7*|*opus*4.7*) EFFORT_LEVEL="xhigh" ;;
+    *)                     EFFORT_LEVEL="high" ;;
+  esac
+fi
+# 2) Effort reel via JSONL — seul moyen fiable de capturer "/effort xxx" (incl. max).
+#    Override la baseline.
 #    Le lookahead exige </local-command-stdout> a moins de 50 chars : evite les
 #    faux positifs quand le code source du statusline (ou un grep de debug) est
 #    lu via Read et stocke dans le JSONL — ces occurrences n'ont pas la balise
-#    fermante immediate. Bloque aussi les "Not applied:" du /effort overrid (env var).
+#    fermante immediate.
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   # Pattern 1 : balise local-command-stdout contenant "Set effort level to max (this session only)"
   _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
@@ -150,11 +161,8 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
   [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
   [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
 fi
-# 3) Env var CLAUDE_CODE_EFFORT_LEVEL : override absolu (Claude Code l'honore en priorite,
-#    le /effort renvoie "Not applied: ... overrides effort this session" quand elle est posee)
-if [ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]; then
-  EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
-fi
+# Note : CLAUDE_CODE_EFFORT_LEVEL env var volontairement ignoree — Claude Code 2.1.x
+# ne l'honore pas au demarrage. Le seul override fiable pour "max" est /effort UI.
 if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
