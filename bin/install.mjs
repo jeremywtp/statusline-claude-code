@@ -26,7 +26,9 @@ ${C.bold}Commandes:${C.reset}
   help         Affiche cette aide
 
 ${C.bold}Options:${C.reset}
-  --no-backup  N'ecrit pas de .bak des fichiers modifies
+  --no-backup        N'ecrit pas de .bak des fichiers modifies
+  --with-fetch-hook  Ajoute le hook UserPromptSubmit "git fetch" sans demander
+  --no-fetch-hook    N'ajoute pas le hook (skip prompt en mode interactif)
 
 ${C.bold}OS supportes:${C.reset}
   ${C.green}Linux${C.reset}   natif ou WSL2         -- installation directe
@@ -46,6 +48,8 @@ async function main() {
   const cmd = args.find((a) => !a.startsWith('-')) || 'install';
   const flags = {
     noBackup: args.includes('--no-backup'),
+    withFetchHook: args.includes('--with-fetch-hook'),
+    noFetchHook: args.includes('--no-fetch-hook'),
   };
 
   if (['help', '--help', '-h'].includes(cmd)) {

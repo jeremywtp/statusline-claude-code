@@ -1,9 +1,10 @@
 // ============================================================================
-// Helpers partages entre plateformes (log, color, exec, backup).
+// Helpers partages entre plateformes (log, color, exec, backup, hook).
 // ============================================================================
 
 import { execSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';
+import { createInterface } from 'node:readline';
 
 export const C = {
   reset: '\x1b[0m',
@@ -53,4 +54,101 @@ export function cmdOutput(cmd) {
   } catch {
     return '';
   }
+}
+
+// ============================================================================
+// Hook UserPromptSubmit "git fetch" — gestion idempotente
+// ============================================================================
+// Le hook lance un "git fetch --quiet --no-tags" detache (& disown) a chaque
+// message envoye, pour que la statusline affiche un ↓N a jour. Optionnel,
+// propose lors de l'install via prompt TTY.
+// ============================================================================
+
+// Marqueur shell unique pour identifier notre hook lors des re-installs et
+// uninstalls. Le "#" en fait un commentaire bash inerte.
+export const FETCH_HOOK_MARKER = '# scc-fetch-hook';
+
+export const FETCH_HOOK_COMMAND =
+  '(cd "$CLAUDE_PROJECT_DIR" && git rev-parse --git-dir >/dev/null 2>&1 && ' +
+  "git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 && " +
+  'git fetch --quiet --no-tags 2>/dev/null) & disown ' +
+  FETCH_HOOK_MARKER;
+
+// Detection : matche le marqueur exact OU une signature heuristique (retro-
+// compat pour les anciennes installs sans marqueur).
+function _isOurHookCommand(cmd) {
+  if (typeof cmd !== 'string') return false;
+  if (cmd.includes(FETCH_HOOK_MARKER)) return true;
+  return cmd.includes('git fetch --quiet --no-tags') && cmd.includes('CLAUDE_PROJECT_DIR');
+}
+
+export function hasFetchHook(settingsJson) {
+  const hooks = settingsJson?.hooks?.UserPromptSubmit;
+  if (!Array.isArray(hooks)) return false;
+  for (const matcher of hooks) {
+    const inner = matcher?.hooks;
+    if (!Array.isArray(inner)) continue;
+    if (inner.some((h) => _isOurHookCommand(h?.command))) return true;
+  }
+  return false;
+}
+
+export function addFetchHook(settingsJson) {
+  if (hasFetchHook(settingsJson)) return false;
+  if (!settingsJson.hooks) settingsJson.hooks = {};
+  if (!Array.isArray(settingsJson.hooks.UserPromptSubmit)) settingsJson.hooks.UserPromptSubmit = [];
+  settingsJson.hooks.UserPromptSubmit.push({
+    hooks: [{ type: 'command', command: FETCH_HOOK_COMMAND }],
+  });
+  return true;
+}
+
+// Retire UNIQUEMENT notre hook, preserve les autres hooks UserPromptSubmit.
+// Nettoie les structures vides (UserPromptSubmit: [], hooks: {}) pour ne pas
+// laisser de cles vides dans settings.json.
+export function removeFetchHook(settingsJson) {
+  const hooks = settingsJson?.hooks?.UserPromptSubmit;
+  if (!Array.isArray(hooks)) return false;
+  let removed = false;
+  const filtered = [];
+  for (const matcher of hooks) {
+    const inner = matcher?.hooks;
+    if (!Array.isArray(inner)) {
+      filtered.push(matcher);
+      continue;
+    }
+    const innerKept = inner.filter((h) => {
+      if (_isOurHookCommand(h?.command)) {
+        removed = true;
+        return false;
+      }
+      return true;
+    });
+    if (innerKept.length > 0) filtered.push({ ...matcher, hooks: innerKept });
+  }
+  if (!removed) return false;
+  if (filtered.length > 0) {
+    settingsJson.hooks.UserPromptSubmit = filtered;
+  } else {
+    delete settingsJson.hooks.UserPromptSubmit;
+    if (Object.keys(settingsJson.hooks).length === 0) delete settingsJson.hooks;
+  }
+  return true;
+}
+
+// Prompt TTY Y/N. Retourne null si pas de TTY (CI / pipe / non-interactif),
+// pour que l'appelant puisse afficher un fallback explicite.
+export async function promptYesNo(question, defaultYes = false) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
+  const suffix = defaultYes ? '[Y/n]' : '[y/N]';
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`${question} ${suffix} `, (answer) => {
+      rl.close();
+      const a = answer.trim().toLowerCase();
+      if (a === '') resolve(defaultYes);
+      else if (a === 'y' || a === 'yes' || a === 'o' || a === 'oui') resolve(true);
+      else resolve(false);
+    });
+  });
 }

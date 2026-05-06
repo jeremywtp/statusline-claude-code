@@ -156,7 +156,9 @@ npx github:jeremywtp/statusline-claude-code doctor
 npx github:jeremywtp/statusline-claude-code uninstall
 
 # Options
-#   --no-backup   n'ecrit pas de .bak des fichiers modifies
+#   --no-backup        n'ecrit pas de .bak des fichiers modifies
+#   --with-fetch-hook  ajoute le hook UserPromptSubmit "git fetch" sans demander
+#   --no-fetch-hook    n'ajoute pas le hook (skip prompt en mode interactif)
 ```
 
 ### Installation manuelle (fallback)
@@ -183,7 +185,29 @@ Puis ajouter dans `~/.claude/settings.json` :
 
 ### Hook `UserPromptSubmit` (optionnel — pour `↓N` plus reactif)
 
-Le statusline lance deja un `git fetch` en background si > 5 min depuis le dernier. Pour rendre `↓N` (commits remote non recuperes) plus reactif, on peut ajouter un hook qui declenche un fetch detache a chaque message envoye :
+Le statusline lance deja un `git fetch` en background si > 5 min depuis le dernier. Pour rendre `↓N` (commits remote non recuperes) **encore plus reactif**, l'installer propose un hook qui declenche un fetch detache a chaque message envoye.
+
+**A l'install, le hook est propose via prompt interactif** :
+
+```
+> Hook UserPromptSubmit "git fetch" (optionnel)
+  Lance "git fetch --quiet --no-tags" detache (& disown) a chaque message
+  envoye, pour rendre ↓N (commits remote non recuperes) plus reactif.
+  Sans le hook, l'auto-fetch tourne quand meme toutes les 5 min.
+
+  Ajouter le hook UserPromptSubmit ? [y/N]
+```
+
+Pour les installs scriptees / CI (sans TTY), utiliser un flag explicite :
+
+```bash
+npx github:jeremywtp/statusline-claude-code --with-fetch-hook   # ajoute sans demander
+npx github:jeremywtp/statusline-claude-code --no-fetch-hook     # skip propre
+```
+
+L'ajout est **idempotent** : relancer l'installer detecte le hook existant et ne le duplique pas. La detection est aussi compatible avec les anciennes installs sans marqueur (heuristique de signature).
+
+Si tu preferes ajouter le hook a la main, le snippet a merger dans `~/.claude/settings.json` :
 
 ```json
 {
@@ -193,7 +217,7 @@ Le statusline lance deja un `git fetch` en background si > 5 min depuis le derni
         "hooks": [
           {
             "type": "command",
-            "command": "(cd \"$CLAUDE_PROJECT_DIR\" && git rev-parse --git-dir >/dev/null 2>&1 && git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 && git fetch --quiet --no-tags 2>/dev/null) & disown"
+            "command": "(cd \"$CLAUDE_PROJECT_DIR\" && git rev-parse --git-dir >/dev/null 2>&1 && git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 && git fetch --quiet --no-tags 2>/dev/null) & disown # scc-fetch-hook"
           }
         ]
       }
@@ -202,11 +226,13 @@ Le statusline lance deja un `git fetch` en background si > 5 min depuis le derni
 }
 ```
 
-A merger dans `~/.claude/settings.json`. La double verification (`rev-parse --git-dir` + `rev-parse --abbrev-ref @{u}`) evite :
+La double verification (`rev-parse --git-dir` + `rev-parse --abbrev-ref @{u}`) evite :
 - d'erreurer dans les dossiers non-git
 - de prompter SSH/HTTPS inutilement sur les branches sans upstream tracke
 
 Le `& disown` detache le fetch du processus parent : il **ne bloque jamais** l'envoi du message.
+
+Le commentaire shell `# scc-fetch-hook` est un marqueur inerte qui sert a `npx ... uninstall` pour retirer **uniquement** ce hook sans toucher aux autres `UserPromptSubmit` que tu pourrais avoir ajoutes manuellement.
 
 ## Fichiers et cache
 

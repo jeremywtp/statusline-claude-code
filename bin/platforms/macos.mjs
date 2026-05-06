@@ -15,7 +15,17 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { log, C, has, backup, cmdOutput } from '../lib.mjs';
+import {
+  log,
+  C,
+  has,
+  backup,
+  cmdOutput,
+  hasFetchHook,
+  addFetchHook,
+  removeFetchHook,
+  promptYesNo,
+} from '../lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHIM_PATH = resolve(__dirname, '..', 'shims', 'macos.sh');
@@ -100,6 +110,44 @@ function mergeSettings() {
     command: '~/.claude/statusline.sh',
   };
   writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
+}
+
+async function maybeInstallFetchHook(flags) {
+  log.step('\nHook UserPromptSubmit "git fetch" (optionnel)');
+  let json = {};
+  try {
+    json = JSON.parse(readFileSync(SETTINGS, 'utf8'));
+  } catch {
+    json = {};
+  }
+  if (hasFetchHook(json)) {
+    log.ok('Hook deja present (idempotent)');
+    return;
+  }
+  let want;
+  if (flags.withFetchHook) {
+    want = true;
+  } else if (flags.noFetchHook) {
+    want = false;
+  } else {
+    log.info(`  ${C.dim}Lance "git fetch --quiet --no-tags" detache (& disown) a chaque message${C.reset}`);
+    log.info(`  ${C.dim}envoye, pour rendre ↓N (commits remote non recuperes) plus reactif.${C.reset}`);
+    log.info(`  ${C.dim}Sans le hook, l'auto-fetch tourne quand meme toutes les 5 min.${C.reset}`);
+    log.info('');
+    want = await promptYesNo('  Ajouter le hook UserPromptSubmit ?', false);
+    if (want === null) {
+      log.warn('Pas de TTY detectee — hook non ajoute');
+      log.info(`  ${C.dim}(relance avec --with-fetch-hook pour forcer)${C.reset}`);
+      return;
+    }
+  }
+  if (!want) {
+    log.info(`  ${C.dim}skip${C.reset}`);
+    return;
+  }
+  addFetchHook(json);
+  writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
+  log.ok('Hook scc-fetch-hook ajoute');
 }
 
 export async function install({ statuslineSrc, flags }) {
@@ -193,6 +241,8 @@ export async function install({ statuslineSrc, flags }) {
   mergeSettings();
   log.ok('statusLine ajoute/mis a jour');
 
+  await maybeInstallFetchHook(flags);
+
   log.title('Installation terminee');
   log.info(`${C.bold}Prochaine etape${C.reset} : redemarre Claude Code pour voir la statusline.`);
   log.info('');
@@ -221,13 +271,19 @@ export async function uninstall({ flags }) {
       if (b) log.info(`  ${C.dim}backup${C.reset} : ${b}`);
     }
     const json = JSON.parse(readFileSync(SETTINGS, 'utf8'));
+    let changed = false;
     if (json.statusLine) {
       delete json.statusLine;
-      writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
+      changed = true;
       log.ok('Cle statusLine retiree de settings.json');
     } else {
       log.warn('Aucune cle statusLine dans settings.json');
     }
+    if (removeFetchHook(json)) {
+      changed = true;
+      log.ok('Hook scc-fetch-hook retire');
+    }
+    if (changed) writeFileSync(SETTINGS, JSON.stringify(json, null, 2) + '\n');
   }
 
   log.info('');
@@ -288,6 +344,8 @@ export async function doctor() {
       if (json.statusLine?.command)
         log.ok(`settings.json -> statusLine : ${json.statusLine.command}`);
       else log.err('settings.json existe mais cle statusLine absente');
+      if (hasFetchHook(json)) log.ok('Hook scc-fetch-hook : present');
+      else log.warn('Hook scc-fetch-hook : absent (relance install pour l\'ajouter)');
     } catch (e) {
       log.err(`settings.json illisible : ${e.message}`);
     }
