@@ -6,7 +6,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ```
 Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 ↓1 │ v2.1.75 ●
-██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ NORMAL 20h-14h ██████░░ 3h19
+██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -36,12 +36,6 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 �
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
 - Cout de la session courante (USD)
 - Duree de la session
-- **Indicateur peak/off-peak** — heures de pointe Anthropic (lun-ven 13h-19h UTC) :
-  - `NORMAL` (terracotta) — off-peak, limites 5h normales
-  - `NERFED` (gris) — peak, limites 5h consommees plus vite
-  - `WEEKEND` (terracotta) — off-peak tout le weekend
-  - Barre de progression + countdown vers la prochaine transition
-  - Couleurs inspirees de [is-claude-nerfed-right-now.vercel.app](https://is-claude-nerfed-right-now.vercel.app/)
 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
@@ -75,22 +69,6 @@ Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-sess
 Le fast mode (x6 sur tous les prix) est detecte de deux manieres :
 - **Affichage ⚡** : lit `fastMode` dans `~/.claude/settings.json` (session courante)
 - **Calcul cout** : lit le champ `speed` de chaque requete dans les JSONL (historique precis)
-
-### Indicateur peak/off-peak
-
-Anthropic ajuste les limites de session 5h pendant les heures de pointe ([source](https://x.com/trq212)). Le script detecte automatiquement la fenetre active :
-
-| Etat | Condition (Pacific Time) | Couleur |
-|---|---|---|
-| **NORMAL** | Lun-ven hors 5h-11h PT | Terracotta (`#cc785c`) |
-| **NERFED** | Lun-ven 5h-11h PT | Gris mute (`#828179`) |
-| **WEEKEND** | Ven 11h PT → lun 5h PT | Terracotta |
-
-- Reference Pacific Time (suit le DST US automatiquement via `TZ`)
-- Heures affichees en timezone locale (ex: 14h-20h CEST/CET)
-- Barre de progression 8 blocs dans la fenetre courante
-- Countdown vers la prochaine transition
-- Couleurs inspirees de [is-claude-nerfed-right-now.vercel.app](https://is-claude-nerfed-right-now.vercel.app/)
 
 ### Thinking tokens
 
