@@ -233,9 +233,6 @@ fi
 # Projet
 LINE1="${LINE1}$(printf '%b' "${SEP}${WHITE}${BOLD}")${PROJECT}$(printf '%b' "${RST}")"
 
-# Git
-LINE1="${LINE1}${GIT_SEGMENT}"
-
 # Version
 LINE1="${LINE1}$(printf '%b' "${SEP}${DIM}${GRAY}")v${VERSION}$(printf '%b' "${RST}")"
 
@@ -340,7 +337,7 @@ fi
 DURATION_SEGMENT="$(printf '%b' "${GRAY}")${DURATION_FMT}$(printf '%b' "${RST}")"
 
 # Assemblage ligne 2
-LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}"
+LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}${GIT_SEGMENT}"
 
 # ============================================================================
 # LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)

@@ -5,8 +5,8 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 ↓1 │ v2.1.75 ●
-██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s
+Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
+██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
 
@@ -22,8 +22,6 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 �
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
-- Branche git avec fichiers staged (`+`), modifies (`~`), untracked (`?`), commits non pousses (`↑` cyan) et commits remote non recuperes (`↓` jaune)
-- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (background POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-*-fetch-*`)
 - Version de Claude Code
 - Indicateur **status Claude** via [status.claude.com](https://status.claude.com) (API `summary.json`, cache 60s) :
   - `●` vert — Operational
@@ -32,10 +30,12 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ * main +2 ~1 ?3 ↑3 �
   - `●` rouge — Major Outage
   - `●` bleu — Maintenance
 
-**Ligne 2 — Contexte & Session**
+**Ligne 2 — Contexte, Session & Git**
 - Barre de progression du contexte avec seuils de couleur (vert < 70%, jaune < 90%, rouge >= 90%)
 - Cout de la session courante (USD)
 - Duree de la session
+- Branche git avec fichiers staged (`+`), modifies (`~`), untracked (`?`), commits non pousses (`↑` cyan) et commits remote non recuperes (`↓` jaune)
+- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (background POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-*-fetch-*`)
 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
