@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
+Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
 ```
@@ -15,9 +15,9 @@ Opus 4.7 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 **Ligne 1 — Identite & Git**
 - Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
-- Indicateur **effort level** en barres verticales (detection live via `<local-command-stdout>` dans le JSONL de session), adapte au modele :
-  - **Sonnet / Opus 4.5 / Opus 4.6** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
-  - **Opus 4.7** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max
+- Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele :
+  - **Sonnet & autres** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
+  - **Opus** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
   - **Haiku** : pas d'indicateur (le modele n'a pas de niveau d'effort)
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
@@ -48,17 +48,18 @@ Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de 
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
 
-### Prix (USD / MTok) — Avril 2026
+### Prix (USD / MTok) — Mai 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
-| **Opus 4.5 / 4.6 / 4.7** | $5 | $25 | $6.25 | $10 | $0.50 |
-| **Opus 4.6 Fast** | $30 | $150 | $37.50 | $60 | $3 |
+| **Opus 4.5 / 4.6 / 4.7 / 4.8** | $5 | $25 | $6.25 | $10 | $0.50 |
+| **Opus 4.6 / 4.7 Fast** | $30 | $150 | $37.50 | $60 | $3 |
+| **Opus 4.8 Fast** | $10 | $50 | $12.50 | $20 | $1 |
 | **Sonnet 4.6** | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
-| Opus legacy | $15 | $75 | $18.75 | $30 | $1.50 |
+| Opus legacy (4 / 4.1) | $15 | $75 | $18.75 | $30 | $1.50 |
 
-> Fast mode est disponible uniquement sur Opus 4.6 (pas sur 4.7).
+> Fast mode est disponible sur Opus 4.6, 4.7 et 4.8 — mais Opus 4.8 a un tarif fast reduit ($10/$50 contre $30/$150 pour 4.6/4.7).
 
 ### Session semaine alignee sur Anthropic
 
@@ -66,7 +67,7 @@ Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-sess
 
 ### Fast mode
 
-Le fast mode (x6 sur tous les prix) est detecte de deux manieres :
+Le fast mode (x6 sur Opus 4.6/4.7, x2 sur Opus 4.8) est detecte de deux manieres :
 - **Affichage ⚡** : lit `fastMode` dans `~/.claude/settings.json` (session courante)
 - **Calcul cout** : lit le champ `speed` de chaque requete dans les JSONL (historique precis)
 
@@ -258,9 +259,9 @@ Claude Code applique l'effort level dans cet ordre (le premier qui matche gagne)
 1. **`CLAUDE_CODE_EFFORT_LEVEL` env var** — override absolu. Quand elle est posee, `/effort <X>` UI est bloquee : Claude Code repond `CLAUDE_CODE_EFFORT_LEVEL=<X> overrides this session — clear it and <Y> takes over`.
 2. **`/effort <X>` UI dans la session courante** — override session-only.
 3. **`effortLevel` dans `~/.claude/settings.json`** — baseline persistante.
-4. **Defaut modele** — `xhigh` sur Opus 4.7, `medium` ailleurs.
+4. **Defaut modele** — `xhigh` sur Opus 4.7, `high` sur Opus 4.8, `medium` ailleurs.
 
-La statusline suit la meme priorite : env var > JSONL `/effort` > settings.json > defaut.
+La statusline lit en priorite le champ **`.effort.level` du JSON stdin** transmis par Claude Code : c'est la valeur live deja resolue (elle reflete `/effort` en cours de session, l'env var, `settings.json` et le defaut modele). Cas particulier **ultracode** : Claude Code le mappe en interne sur `xhigh`, donc `.effort.level` renvoie `xhigh` (indistinct d'un vrai xhigh) ; pour l'afficher distinctement (`▌▌▌▌▌ ✦`), la statusline ne leve l'ambiguite que dans ce cas, en lisant le dernier `Set effort level to ultracode` du transcript. Si `.effort.level` est absent (Claude Code trop ancien, ou modele sans effort comme Haiku), elle retombe sur le fallback historique : `/effort` dans le transcript > `settings.json` > env var.
 
 **Detail technique du pattern grep `/effort`** : Claude Code ecrit deux formats distincts dans `local-command-stdout` selon que le niveau est persistant ou session-only :
 

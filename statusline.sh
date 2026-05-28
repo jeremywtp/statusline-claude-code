@@ -37,6 +37,7 @@ BGREEN='\033[38;5;82m'
 BYELLOW='\033[38;5;227m'
 BCYAN='\033[38;5;51m'
 ORANGE='\033[38;5;208m'
+UMAGENTA='\033[38;5;201m'  # magenta vif — reserve a ultracode (effort "ultra")
 
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
@@ -48,7 +49,7 @@ _SL_PREFIX="/tmp/claude-sl-$(id -u 2>/dev/null || echo 0)"
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
 MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0; CTX_PCT=0
-AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""
+AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""; EFFORT_STDIN=""
 
 _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "MODEL_NAME=\(.model.display_name // "---")",
@@ -59,7 +60,8 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "CTX_PCT=\(.context_window.used_percentage // 0)",
   @sh "AGENT_NAME=\(.agent.name // "")",
   @sh "VIM_MODE=\(.vim.mode // "")",
-  @sh "TRANSCRIPT_PATH=\(.transcript_path // "")"
+  @sh "TRANSCRIPT_PATH=\(.transcript_path // "")",
+  @sh "EFFORT_STDIN=\(.effort.level // "")"
 ' 2>/dev/null) || true
 
 [ -n "$_JQ_OUT" ] && eval "$_JQ_OUT"
@@ -161,50 +163,63 @@ fi
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
 # Indicateurs Fast mode + Effort level
-# 1) settings.json — base de l'effort persistant
-_SETTINGS=$(jq -r '(.fastMode // false | tostring) + "|" + (.effortLevel // "default")' "$HOME/.claude/settings.json" 2>/dev/null) || _SETTINGS="false|default"
-FAST_MODE="${_SETTINGS%%|*}"
-EFFORT_LEVEL="${_SETTINGS#*|}"
-# 2) Effort reel via JSONL — capture le choix via /effort ou /model.
-#    Claude Code ecrit deux formats distincts dans local-command-stdout selon
-#    que le niveau est persistant ou session-only :
-#      - low/medium/high/xhigh : "Set effort level to <X>: <description>"
-#      - max                   : "Set effort level to max (this session only): <description>"
-#    Le pattern doit donc tolerer un suffixe variable. Lookahead 200 chars sur
-#    </local-command-stdout> couvre toutes les descriptions (jusqu'a ~95 chars
-#    pour high) tout en restant anti-faux-positif (le code source lu via Read
-#    n'a pas </local-command-stdout> a proximite immediate).
-if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-  # Pattern 1 : "Set effort level to <X>" (les 2 formats)
-  _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
-  # Pattern 2 : "Effort level: auto" ou "Current effort level: medium"
-  [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
-  [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
-fi
-# 3) Env var CLAUDE_CODE_EFFORT_LEVEL : override absolu. Claude Code l'honore
-#    et bloque /effort UI quand elle est posee ("CLAUDE_CODE_EFFORT_LEVEL=<X>
-#    overrides this session — clear it and <Y> takes over").
-if [ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]; then
-  EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
+# Fast mode : aucun champ dans le JSON stdin, lu dans settings.json.
+FAST_MODE=$(jq -r '.fastMode // false' "$HOME/.claude/settings.json" 2>/dev/null) || FAST_MODE="false"
+
+# Effort level — source canonique : .effort.level du JSON stdin. Valeur LIVE
+# resolue par Claude Code (reflete /effort en cours de session, et "ultra" =
+# ultracode). Absente si le modele ne supporte pas l'effort (Haiku) ou si Claude
+# Code est trop ancien pour exposer ce champ → fallback historique :
+# settings.json (effortLevel) > /effort dans le transcript > env var.
+if [ -n "$EFFORT_STDIN" ]; then
+  EFFORT_LEVEL="$EFFORT_STDIN"
+  # ultracode est rendu "xhigh" dans le stdin (mapping interne de Claude Code) :
+  # le champ .effort.level ne le distingue PAS d'un vrai xhigh. On leve l'ambiguite
+  # uniquement dans ce cas, via le dernier /effort du transcript ("ultracode").
+  if [ "$EFFORT_STDIN" = "xhigh" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+    _LAST_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LAST_EFFORT=""
+    [ "$_LAST_EFFORT" = "ultracode" ] && EFFORT_LEVEL="ultracode"
+  fi
+else
+  EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$HOME/.claude/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
+  # Claude Code ecrit deux formats dans local-command-stdout selon que le niveau
+  # est persistant ou session-only :
+  #   - low/medium/high/xhigh : "Set effort level to <X>: <description>"
+  #   - max                   : "Set effort level to max (this session only): ..."
+  # Lookahead 200 chars : tolere le suffixe variable, anti-faux-positif.
+  if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+    _LIVE_EFFORT=$(grep -oP 'local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || _LIVE_EFFORT=""
+    [ -z "$_LIVE_EFFORT" ] && _LIVE_EFFORT=$(grep -ioP 'local-command-stdout>(?:current )?effort level: \K\w+(?=[^<>]{0,50}</local-command-stdout>)' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1) || true
+    [ -n "$_LIVE_EFFORT" ] && EFFORT_LEVEL="$_LIVE_EFFORT"
+  fi
+  # Env var CLAUDE_CODE_EFFORT_LEVEL : override absolu cote Claude Code.
+  if [ -n "${CLAUDE_CODE_EFFORT_LEVEL:-}" ]; then
+    EFFORT_LEVEL="$CLAUDE_CODE_EFFORT_LEVEL"
+  fi
 fi
 if [ "$FAST_MODE" = "true" ]; then
   LINE1="${LINE1} $(printf '%b' "${BYELLOW}\xe2\x9a\xa1${RST}")"
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : pas de barre | Opus 4.7 : 5 barres (avec xhigh) | autres : 4 barres
+# Haiku : aucune barre | Opus (toutes versions) : echelle 5 niveaux (xhigh dispo
+# des 4.7) | Sonnet & autres : 4 niveaux. On matche tous les Opus plutot qu'une
+# version precise : future-proof (4.8, 4.9...) et sans piege de comparaison de
+# version (4.10 < 4.7 en flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc
+# la 4e graduation reste simplement inutilisee pour eux.
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$MODEL_NAME" in
   *Haiku*|*haiku*)
     : # pas d'indicateur d'effort sur Haiku
     ;;
-  *Opus*4.7*|*opus*4.7*)
+  *Opus*|*opus*)
     # 5 niveaux : low, medium, high, xhigh, max
     case "$EFFORT_LEVEL" in
       low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
       high)    LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
       xhigh)   LINE1="${LINE1} $(printf '%b' "${ORANGE}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
       max)     LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      ultra|ultracode) LINE1="${LINE1} $(printf '%b' "${UMAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST} ${UMAGENTA}\xe2\x9c\xa6${RST}")" ;;
       *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
     esac
     ;;
@@ -214,6 +229,7 @@ case "$MODEL_NAME" in
       low)         LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
       high|xhigh)  LINE1="${LINE1} $(printf '%b' "${BRED}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${RST}")" ;;
       max)         LINE1="${LINE1} $(printf '%b' "${MAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
+      ultra|ultracode) LINE1="${LINE1} $(printf '%b' "${UMAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST} ${UMAGENTA}\xe2\x9c\xa6${RST}")" ;;
       *)           LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
     esac
     ;;
@@ -508,14 +524,22 @@ if usage_cache_stale && ! usage_in_backoff; then
           cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
-      # Prix officiels Anthropic (USD / MTok) — mars 2026
+      # Prix officiels Anthropic (USD / MTok) — verifie mai 2026 (Opus 4.8 inclus)
       WEEK_COST=$(jq -sc '
         group_by(.reqId) | map(last) |
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-[567]")) then
+          if (.model // "" | test("opus-4-8")) then
+            # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
+            # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
+            if .speed == "fast" then
+              ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+            else
+              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            end
+          elif (.model // "" | test("opus-4-[567]")) then
             if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
             else
@@ -551,7 +575,15 @@ if usage_cache_stale && ! usage_in_backoff; then
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-[567]")) then
+          if (.model // "" | test("opus-4-8")) then
+            # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
+            # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
+            if .speed == "fast" then
+              ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+            else
+              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            end
+          elif (.model // "" | test("opus-4-[567]")) then
             if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
             else
