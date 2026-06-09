@@ -13,11 +13,11 @@ Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 ## Fonctionnalites
 
 **Ligne 1 — Identite & Git**
-- Nom du modele avec couleur (Opus = magenta, Sonnet = bleu, Haiku = cyan)
+- Nom du modele avec couleur (Fable 5 = or/ambre, Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
 - Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele :
   - **Sonnet & autres** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
-  - **Opus** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
+  - **Fable 5 & Opus** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7 et sur Fable 5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
   - **Haiku** : pas d'indicateur (le modele n'a pas de niveau d'effort)
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
@@ -48,10 +48,11 @@ Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de 
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
 
-### Prix (USD / MTok) — Mai 2026
+### Prix (USD / MTok) — Juin 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
+| **Fable 5** (flagship) | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 4.5 / 4.6 / 4.7 / 4.8** | $5 | $25 | $6.25 | $10 | $0.50 |
 | **Opus 4.6 / 4.7 Fast** | $30 | $150 | $37.50 | $60 | $3 |
 | **Opus 4.8 Fast** | $10 | $50 | $12.50 | $20 | $1 |
@@ -59,6 +60,7 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
 | Opus legacy (4 / 4.1) | $15 | $75 | $18.75 | $30 | $1.50 |
 
+> **Fable 5** est le tier au-dessus d'Opus (le modele le plus puissant) — tarif unique $10/$50, sans fast mode.
 > Fast mode est disponible sur Opus 4.6, 4.7 et 4.8 — mais Opus 4.8 a un tarif fast reduit ($10/$50 contre $30/$150 pour 4.6/4.7).
 
 ### Session semaine alignee sur Anthropic

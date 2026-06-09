@@ -38,6 +38,7 @@ BYELLOW='\033[38;5;227m'
 BCYAN='\033[38;5;51m'
 ORANGE='\033[38;5;208m'
 UMAGENTA='\033[38;5;201m'  # magenta vif — reserve a ultracode (effort "ultra")
+GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable 5 (modele flagship, tier au-dessus d'Opus)
 
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
@@ -74,6 +75,7 @@ CTX_PCT_INT=$(printf '%.0f' "$CTX_PCT" 2>/dev/null) || CTX_PCT_INT=0
 
 # --- Couleur du modele ---
 case "$MODEL_NAME" in
+  *Fable*|*fable*)   MC="$GOLD" ;;
   *Opus*|*opus*)     MC="$MAGENTA" ;;
   *Sonnet*|*sonnet*) MC="$BLUE" ;;
   *Haiku*|*haiku*)   MC="$CYAN" ;;
@@ -202,17 +204,18 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : aucune barre | Opus (toutes versions) : echelle 5 niveaux (xhigh dispo
-# des 4.7) | Sonnet & autres : 4 niveaux. On matche tous les Opus plutot qu'une
-# version precise : future-proof (4.8, 4.9...) et sans piege de comparaison de
-# version (4.10 < 4.7 en flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc
-# la 4e graduation reste simplement inutilisee pour eux.
+# Haiku : aucune barre | Fable 5 + Opus (toutes versions) : echelle 5 niveaux
+# (xhigh dispo des Opus 4.7 et sur Fable 5) | Sonnet & autres : 4 niveaux. On
+# matche tous les Opus plutot qu'une version precise : future-proof (4.8, 4.9...)
+# et sans piege de comparaison de version (4.10 < 4.7 en flottant). Les Opus < 4.7
+# n'emettent jamais xhigh, donc la 4e graduation reste simplement inutilisee pour
+# eux. Fable 5, tier au-dessus d'Opus, supporte low/medium/high/xhigh/max.
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$MODEL_NAME" in
   *Haiku*|*haiku*)
     : # pas d'indicateur d'effort sur Haiku
     ;;
-  *Opus*|*opus*)
+  *Fable*|*fable*|*Opus*|*opus*)
     # 5 niveaux : low, medium, high, xhigh, max
     case "$EFFORT_LEVEL" in
       low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
@@ -524,14 +527,18 @@ if usage_cache_stale && ! usage_in_backoff; then
           cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
-      # Prix officiels Anthropic (USD / MTok) — verifie mai 2026 (Opus 4.8 inclus)
+      # Prix officiels Anthropic (USD / MTok) — verifie juin 2026 (Fable 5 + Opus 4.8 inclus)
       WEEK_COST=$(jq -sc '
         group_by(.reqId) | map(last) |
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-8")) then
+          if (.model // "" | test("fable")) then
+            # Fable 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
+            ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+          elif (.model // "" | test("opus-4-8")) then
             # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
             # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
             if .speed == "fast" then
@@ -575,7 +582,11 @@ if usage_cache_stale && ! usage_in_backoff; then
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("opus-4-8")) then
+          if (.model // "" | test("fable")) then
+            # Fable 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
+            ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+          elif (.model // "" | test("opus-4-8")) then
             # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
             # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
             if .speed == "fast" then
