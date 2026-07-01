@@ -204,18 +204,18 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : aucune barre | Fable 5 + Opus (toutes versions) : echelle 5 niveaux
-# (xhigh dispo des Opus 4.7 et sur Fable 5) | Sonnet & autres : 4 niveaux. On
-# matche tous les Opus plutot qu'une version precise : future-proof (4.8, 4.9...)
-# et sans piege de comparaison de version (4.10 < 4.7 en flottant). Les Opus < 4.7
-# n'emettent jamais xhigh, donc la 4e graduation reste simplement inutilisee pour
-# eux. Fable 5, tier au-dessus d'Opus, supporte low/medium/high/xhigh/max.
+# Haiku : aucune barre | Fable 5 + Opus (toutes versions) + Sonnet 5 : echelle 5
+# niveaux (xhigh dispo des Opus 4.7, sur Fable 5 et sur Sonnet 5) | Sonnet 4.6 &
+# autres : 4 niveaux. On matche tous les Opus plutot qu'une version precise :
+# future-proof (4.8, 4.9...) et sans piege de comparaison de version (4.10 < 4.7 en
+# flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc la 4e graduation reste
+# inutilisee pour eux. Sonnet 5 est le premier Sonnet a supporter xhigh (5 niveaux).
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$MODEL_NAME" in
   *Haiku*|*haiku*)
     : # pas d'indicateur d'effort sur Haiku
     ;;
-  *Fable*|*fable*|*Opus*|*opus*)
+  *Fable*|*fable*|*Opus*|*opus*|*"Sonnet 5"*|*"sonnet 5"*)
     # 5 niveaux : low, medium, high, xhigh, max
     case "$EFFORT_LEVEL" in
       low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
@@ -527,15 +527,15 @@ if usage_cache_stale && ! usage_in_backoff; then
           cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
-      # Prix officiels Anthropic (USD / MTok) — verifie juin 2026 (Fable 5 + Opus 4.8 inclus)
+      # Prix officiels Anthropic (USD / MTok) — verifie juillet 2026 (Fable 5, Opus 4.8, Sonnet 5 inclus)
       WEEK_COST=$(jq -sc '
         group_by(.reqId) | map(last) |
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("fable")) then
-            # Fable 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
+          if (.model // "" | test("fable|mythos")) then
+            # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
           elif (.model // "" | test("opus-4-8")) then
@@ -556,6 +556,15 @@ if usage_cache_stale && ! usage_in_backoff; then
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("haiku")) then
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+          elif (.model // "" | test("sonnet-5")) then
+            # Sonnet 5 : promo $2/$10 avant le 01/09/2026, puis standard $3/$15 (bascule 01/09).
+            # Prix selon la date du message (.ts) - comparaison de chaine ISO, pas de dep a date.
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input en vigueur.
+            if .ts < "2026-09-01T00:00:00Z" then
+              ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
+            else
+              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
+            end
           else
             ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
           end
@@ -582,8 +591,8 @@ if usage_cache_stale && ! usage_in_backoff; then
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
           .cache_read as $cr |
-          if (.model // "" | test("fable")) then
-            # Fable 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
+          if (.model // "" | test("fable|mythos")) then
+            # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
           elif (.model // "" | test("opus-4-8")) then
@@ -604,6 +613,15 @@ if usage_cache_stale && ! usage_in_backoff; then
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("haiku")) then
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+          elif (.model // "" | test("sonnet-5")) then
+            # Sonnet 5 : promo $2/$10 avant le 01/09/2026, puis standard $3/$15 (bascule 01/09).
+            # Prix selon la date du message (.ts) - comparaison de chaine ISO, pas de dep a date.
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input en vigueur.
+            if .ts < "2026-09-01T00:00:00Z" then
+              ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
+            else
+              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
+            end
           else
             ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
           end

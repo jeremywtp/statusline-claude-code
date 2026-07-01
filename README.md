@@ -16,8 +16,8 @@ Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 - Nom du modele avec couleur (Fable 5 = or/ambre, Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
 - Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele :
-  - **Sonnet & autres** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
-  - **Fable 5 & Opus** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7 et sur Fable 5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
+  - **Sonnet 4.6 & autres** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
+  - **Fable 5, Opus & Sonnet 5** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7, sur Fable 5 et sur Sonnet 5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
   - **Haiku** : pas d'indicateur (le modele n'a pas de niveau d'effort)
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
@@ -48,20 +48,23 @@ Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de 
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
 
-### Prix (USD / MTok) — Juin 2026
+### Prix (USD / MTok) — Juillet 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
 | **Fable 5** (flagship) | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 4.5 / 4.6 / 4.7 / 4.8** | $5 | $25 | $6.25 | $10 | $0.50 |
-| **Opus 4.6 / 4.7 Fast** | $30 | $150 | $37.50 | $60 | $3 |
+| **Opus 4.7 Fast** (et 4.6 avant 29/06/26) | $30 | $150 | $37.50 | $60 | $3 |
 | **Opus 4.8 Fast** | $10 | $50 | $12.50 | $20 | $1 |
+| **Sonnet 5** (promo → 31/08/26) | $2 | $10 | $2.50 | $4 | $0.20 |
+| **Sonnet 5** (standard 01/09/26 →) | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Sonnet 4.6** | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
 | Opus legacy (4 / 4.1) | $15 | $75 | $18.75 | $30 | $1.50 |
 
-> **Fable 5** est le tier au-dessus d'Opus (le modele le plus puissant) — tarif unique $10/$50, sans fast mode.
-> Fast mode est disponible sur Opus 4.6, 4.7 et 4.8 — mais Opus 4.8 a un tarif fast reduit ($10/$50 contre $30/$150 pour 4.6/4.7).
+> **Fable 5** — et **Mythos 5** (Project Glasswing, meme tier et meme tarif) — est au-dessus d'Opus (le modele le plus puissant) : $10/$50, sans fast mode.
+> Fast mode : Opus 4.7 ($30/$150) et Opus 4.8 ($10/$50, tarif reduit). Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis) ; le calcul suit le champ `speed` reel de chaque message.
+> **Sonnet 5** est en tarif promo ($2/$10) jusqu'au 31/08/2026, puis $3/$15 — la bascule est automatique selon la date de chaque message (`.ts`), sans fast mode.
 
 ### Session semaine alignee sur Anthropic
 
