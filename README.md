@@ -1,13 +1,13 @@
 # Claude Code Statusline
 
-Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j avec calcul de cout reel depuis les logs JSONL.
+Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j (+ quota Fable 7j dedie) avec calcul de cout reel depuis les logs JSONL.
 
 ## Preview
 
 ```
 Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
-5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50
+5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50 │ Fable 14%
 ```
 
 ## Fonctionnalites
@@ -40,7 +40,8 @@ Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
 - Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel**
-- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, flock multi-instances)
+- **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable 5 a sa propre limite hebdo, exposee par l'API dans `limits[]` (entree `weekly_scoped` avec `scope.model.display_name = "Fable"`). Le segment est masque si le compte n'a pas de limite dediee
+- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances)
 
 ## Calcul des couts
 
@@ -107,12 +108,12 @@ npx github:jeremywtp/statusline-claude-code
 
 ### macOS (Intel + Apple Silicon)
 
-Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `date -d`, `md5sum`, `grep -oP`, `flock`, et depend de Bash 5+). L'installer macOS :
+Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `date -d`, `md5sum`, `grep -oP`, et depend de Bash 5+). L'installer macOS :
 
 1. verifie Homebrew (refuse si absent et renvoie la commande d'install Homebrew)
 2. detecte Apple Silicon (`/opt/homebrew`) ou Intel (`/usr/local`)
 3. `brew install coreutils findutils grep bash jq curl git` pour ce qui manque seulement
-4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`md5sum`/`grep`/`find`/`flock` vers leurs equivalents GNU (`gstat`, `gdate`, `gmd5sum`, `ggrep`, `gfind`) et stub `flock` (inexistant sur macOS)
+4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`md5sum`/`grep`/`find` vers leurs equivalents GNU (`gstat`, `gdate`, `gmd5sum`, `ggrep`, `gfind`) — le verrou API utilise `mkdir` (atomique, natif partout), aucune dependance a `flock`
 5. reecrit le shebang vers Bash 5+ Homebrew (macOS livre `/bin/bash` en 3.2)
 6. lit le token OAuth dans le **Keychain** (`security find-generic-password -s "Claude Code-credentials"`) en fallback de `~/.claude/.credentials.json` — Claude Code stocke le token dans le Keychain par defaut sur Mac, alors que sur Linux/WSL il l'ecrit dans le fichier
 
@@ -225,9 +226,9 @@ Le commentaire shell `# scc-fetch-hook` est un marqueur inerte qui sert a `npx .
 | `~/.claude/settings.json` | Config Claude Code (statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
 | `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
-| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas + couts 5h/7j, 7 champs) | 300s |
+| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas 5h/7j/Fable + couts, 7 champs) | 300s |
 | `/tmp/claude-sl-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
-| `/tmp/claude-sl-usage.lock` | Flock — un seul appel API a la fois (multi-instances) | — |
+| `/tmp/claude-sl-usage.lock.d` | Verrou mkdir — un seul appel API a la fois (multi-instances, casse si orphelin > 30s) | — |
 | `/tmp/claude-sl-git-*` | Cache git status par repertoire (incl. `↑N ↓N` ahead/behind) | 5s |
 | `/tmp/claude-sl-fetch-*` | Lock auto-fetch par repertoire — empeche les fetch trop frequents | 300s |
 | `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
@@ -237,7 +238,7 @@ Le commentaire shell `# scc-fetch-hook` est un marqueur inerte qui sert a `npx .
 L'API `/api/oauth/usage` est sujette a du rate limiting (429). Le script combine plusieurs mecanismes de protection :
 
 - **Backoff 429** : apres un 429, attend 10 min avant de reessayer (`/tmp/claude-sl-usage-backoff`)
-- **Flock** : un seul process appelle l'API a la fois (non-bloquant, les autres utilisent le cache)
+- **Verrou mkdir** : un seul process appelle l'API a la fois (`mkdir` atomique, portable macOS/Linux — un verrou orphelin est casse apres 30s). Les autres instances utilisent le cache
 - **Fallback 3 niveaux** pour ne jamais perdre les donnees :
   1. **API OK (200)** — met a jour le cache `/tmp` + le fichier durable `~/.claude/usage-session`
   2. **API echouee + cache existant** — recalcule les couts depuis les JSONL, preserve les quotas du cache

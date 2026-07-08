@@ -359,15 +359,15 @@ DURATION_SEGMENT="$(printf '%b' "${GRAY}")${DURATION_FMT}$(printf '%b' "${RST}")
 LINE2="${BAR_SEGMENT}$(printf '%b' "${SEP}")${SESSION_SEGMENT}$(printf '%b' "${SEP}")${DURATION_SEGMENT}${GIT_SEGMENT}"
 
 # ============================================================================
-# LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j)
+# LIGNE 3 : Usage reel via API OAuth Anthropic (5h + 7j + Fable 7j)
 # Source : /api/oauth/usage — donnees officielles du plan Max20
-# Cache dans /tmp avec TTL de 300s + backoff 600s sur 429 + flock multi-instances
+# Cache dans /tmp avec TTL de 300s + backoff 600s sur 429 + verrou mkdir multi-instances
 # ============================================================================
 USAGE_CACHE="${_SL_PREFIX}-usage-cache"
 USAGE_CACHE_TTL=300
 USAGE_BACKOFF_FILE="${_SL_PREFIX}-usage-backoff"
 USAGE_BACKOFF_TTL=600
-USAGE_LOCK="${_SL_PREFIX}-usage.lock"
+USAGE_LOCK_DIR="${_SL_PREFIX}-usage.lock.d"
 USAGE_SESSION_FILE="$HOME/.claude/usage-session"
 
 usage_cache_stale() {
@@ -396,7 +396,7 @@ if usage_cache_stale && ! usage_in_backoff; then
     PREV_BLOCK_COST=$(echo "$PREV_USAGE" | awk -F'|' '{print $7}') || PREV_BLOCK_COST="0"
   fi
 
-  # --- Appel API OAuth usage (flock : un seul process a la fois) ---
+  # --- Appel API OAuth usage (verrou mkdir : un seul process a la fois) ---
   # Source du token : .credentials.json (Linux/WSL) ou Keychain (defaut macOS).
   OAUTH_TOKEN=""
   if [ -f "$HOME/.claude/.credentials.json" ]; then
@@ -426,17 +426,35 @@ if usage_cache_stale && ! usage_in_backoff; then
     rm -f "$_tmp_file"
   }
 
+  # Verrou non-bloquant portable : mkdir est atomique sur tous les OS, sans
+  # dependance a flock(1) qui n'existe pas sur macOS (le shim le neutralisait
+  # en no-op, donc toutes les instances appelaient l'API en parallele). Un
+  # verrou plus vieux que 30s est repute orphelin (process mort) et casse :
+  # la section critique (curl --max-time 5) ne depasse jamais quelques secondes.
+  _usage_lock_acquire() {
+    if mkdir "$USAGE_LOCK_DIR" 2>/dev/null; then
+      return 0
+    fi
+    local now lock_mtime
+    now=$(date +%s)
+    lock_mtime=$(stat -c %Y "$USAGE_LOCK_DIR" 2>/dev/null || echo "$now")
+    if [ $((now - lock_mtime)) -gt 30 ]; then
+      rmdir "$USAGE_LOCK_DIR" 2>/dev/null || true
+      mkdir "$USAGE_LOCK_DIR" 2>/dev/null && return 0
+    fi
+    return 1
+  }
+
   if [ -n "$OAUTH_TOKEN" ]; then
-    # flock -n : non-bloquant, une seule instance appelle l'API
-    exec 9>"$USAGE_LOCK"
-    if flock -n 9; then
+    # Une seule instance appelle l'API, les autres restent sur le fallback cache
+    if _usage_lock_acquire; then
       _fetch_usage
       # Sur 429 : activer le backoff de 10 min
       if [ "$API_HTTP" = "429" ]; then
         touch "$USAGE_BACKOFF_FILE" 2>/dev/null || true
       fi
+      rmdir "$USAGE_LOCK_DIR" 2>/dev/null || true
     fi
-    exec 9>&-
   fi
 
   # Valider que la reponse contient bien les champs attendus
@@ -447,7 +465,9 @@ if usage_cache_stale && ! usage_in_backoff; then
         (.five_hour.resets_at // "" | tostring),
         (.seven_day.utilization // 0 | tostring),
         (.seven_day.resets_at // "" | tostring),
-        ""
+        # Quota 7j dedie a Fable : entree weekly_scoped du tableau limits dont
+        # le scope model vise Fable. Chaine vide si absente (segment masque).
+        ([.limits[]? | select(.kind == "weekly_scoped" and ((.scope.model.display_name // "") | test("fable"; "i")))] | first | .percent // "" | tostring)
       ] | join("|")
     ' 2>/dev/null) || USAGE_DATA="0||0||"
     # Persister dans le fichier durable (survit aux purges /tmp et reboots)
@@ -458,7 +478,7 @@ if usage_cache_stale && ! usage_in_backoff; then
     # 2) Fichier durable ~/.claude/usage-session
     # 3) Zeros (premier lancement uniquement)
     if [ -n "$PREV_USAGE" ]; then
-      USAGE_DATA=$(echo "$PREV_USAGE" | awk -F'|' '{OFS="|"; print $1,$2,$3,$4,""}') || USAGE_DATA="0||0||"
+      USAGE_DATA=$(echo "$PREV_USAGE" | awk -F'|' '{OFS="|"; print $1,$2,$3,$4,$5}') || USAGE_DATA="0||0||"
     elif [ -f "$USAGE_SESSION_FILE" ]; then
       USAGE_DATA=$(cat "$USAGE_SESSION_FILE" 2>/dev/null) || USAGE_DATA="0||0||"
     else
@@ -513,7 +533,16 @@ if usage_cache_stale && ! usage_in_backoff; then
   fi
 
   if [ -n "$WEEK_START" ]; then
-    WEEK_TMP="${_SL_PREFIX}-week-raw.jsonl"
+    # mktemp : fichier temporaire unique par process. Un chemin partage entre
+    # instances paralleles se faisait tronquer/supprimer en pleine lecture,
+    # ce qui remettait les couts 5h/7j a zero de maniere aleatoire.
+    # Purge prealable des orphelins (> 5 min) : une instance tuee en plein
+    # calcul (timeout statusline) laisse son mktemp derriere elle. Le filtre
+    # par age ne touche jamais le fichier d'une instance vivante. Trailing
+    # slash obligatoire : sur macOS /tmp est un symlink (-> private/tmp) que
+    # find ne dereference pas sans lui.
+    find "${_SL_PREFIX%/*}/" -maxdepth 1 -name "${_SL_PREFIX##*/}-week-raw-*" -mmin +5 -delete 2>/dev/null || true
+    WEEK_TMP=$(mktemp "${_SL_PREFIX}-week-raw-XXXXXX")
     find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 -exec \
       jq -c --arg tw "$WEEK_START" \
         'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
@@ -654,11 +683,16 @@ else
 fi
 
 # Parsing du cache (garantir 7 champs meme si cache ancien/incomplet)
-IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO _UNUSED WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
+IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO PCT_FABLE WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
 WEEK_COST="${WEEK_COST:-0}"
 BLOCK_COST="${BLOCK_COST:-0}"
 PCT_5H_INT=$(printf '%.0f' "${PCT_5H:-0}" 2>/dev/null) || PCT_5H_INT=0
 PCT_7D_INT=$(printf '%.0f' "${PCT_7D:-0}" 2>/dev/null) || PCT_7D_INT=0
+# Quota Fable : vide si le compte est sans limite dediee (segment masque)
+PCT_FABLE_INT=""
+if [ -n "${PCT_FABLE:-}" ]; then
+  PCT_FABLE_INT=$(printf '%.0f' "$PCT_FABLE" 2>/dev/null) || PCT_FABLE_INT=""
+fi
 
 # --- Mini-barre ▰▱ (10 blocs) ---
 mini_bar() {
@@ -733,7 +767,14 @@ BLOCK_COST_FMT=$(printf '$%.2f' "${BLOCK_COST:-0}" 2>/dev/null) || BLOCK_COST_FM
 BLOCK_SEG="$(printf '%b' "${WHITE}")5h$(printf '%b' "${RST}") ${BAR_5H} $(printf '%b' "${COLOR_5H}${BOLD}")${PCT_5H_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_5H}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${BLOCK_COST_FMT}$(printf '%b' "${RST}")"
 WEEK_SEG="$(printf '%b' "${WHITE}")7j$(printf '%b' "${RST}") ${BAR_7D} $(printf '%b' "${COLOR_7D}${BOLD}")${PCT_7D_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_7D}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${WEEK_COST_FMT}$(printf '%b' "${RST}")"
 
-LINE3="${BLOCK_SEG}$(printf '%b' "${SEP}")${WEEK_SEG}"
+# --- Segment Fable 7j : juste le pourcentage (limite hebdo dediee au modele) ---
+FABLE_SEG=""
+if [ -n "$PCT_FABLE_INT" ]; then
+  COLOR_FABLE=$(usage_color "$PCT_FABLE_INT")
+  FABLE_SEG="$(printf '%b' "${SEP}${GOLD}")Fable$(printf '%b' "${RST}") $(printf '%b' "${COLOR_FABLE}${BOLD}")${PCT_FABLE_INT}%$(printf '%b' "${RST}")"
+fi
+
+LINE3="${BLOCK_SEG}$(printf '%b' "${SEP}")${WEEK_SEG}${FABLE_SEG}"
 
 # ============================================================================
 # SORTIE
