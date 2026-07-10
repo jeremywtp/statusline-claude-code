@@ -160,7 +160,7 @@ if [ "$GIT_AVAILABLE" = "true" ] && [ -n "$GIT_BRANCH" ]; then
 fi
 
 # ============================================================================
-# LIGNE 1 : Modele | Projet | Git | Version
+# LIGNE 1 : Modele | Fast | Effort | Agent | Vim | Projet | Version | Status
 # ============================================================================
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
@@ -171,8 +171,10 @@ FAST_MODE=$(jq -r '.fastMode // false' "$HOME/.claude/settings.json" 2>/dev/null
 # Effort level — source canonique : .effort.level du JSON stdin. Valeur LIVE
 # resolue par Claude Code (reflete /effort en cours de session, et "ultra" =
 # ultracode). Absente si le modele ne supporte pas l'effort (Haiku) ou si Claude
-# Code est trop ancien pour exposer ce champ → fallback historique :
-# settings.json (effortLevel) > /effort dans le transcript > env var.
+# Code est trop ancien pour exposer ce champ → fallback historique. Les trois
+# sources sont lues dans l'ordre settings.json, transcript, env var : chacune
+# ecrase la precedente, donc la preseance reelle est l'inverse de l'ordre de
+# lecture → env var > transcript > settings.json.
 if [ -n "$EFFORT_STDIN" ]; then
   EFFORT_LEVEL="$EFFORT_STDIN"
   # ultracode est rendu "xhigh" dans le stdin (mapping interne de Claude Code) :
@@ -312,7 +314,7 @@ case "$STATUS_IND" in
 esac
 
 # ============================================================================
-# LIGNE 2 : Barre contexte | Session cout | Lignes | Duree
+# LIGNE 2 : Barre contexte | Cout session | Duree | Git
 # ============================================================================
 
 # --- Barre de progression ---

@@ -7,18 +7,19 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ```
 Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
-5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▰▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50 │ Fable 14%
+5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▱▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50 │ Fable 14%
 ```
 
 ## Fonctionnalites
 
-**Ligne 1 — Identite & Git**
+**Ligne 1 — Identite & Statut**
 - Nom du modele avec couleur (Fable 5 = or/ambre, Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif
-- Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele :
-  - **Sonnet 4.6 & autres** (4 barres) : `▌░░░` low (cyan) → `▌▌░░` medium (jaune) → `▌▌▌░` high (rouge) → `▌▌▌▌` max (magenta)
-  - **Fable 5, Opus & Sonnet 5** (5 barres) : ajoute `▌▌▌▌░` xhigh (orange) entre high et max (xhigh existe a partir d'Opus 4.7, sur Fable 5 et sur Sonnet 5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
+- Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele. Toutes les graduations sont des `▌` : celles atteintes prennent la couleur du niveau, les suivantes restent grises (`DIM`)
+  - **Sonnet 4.6 & autres** (4 graduations) : low (1, cyan) → medium (2, jaune) → high (3, rouge) → max (4, magenta). `xhigh` retombe sur high ; **ultracode** affiche 4 graduations + `✦`
+  - **Fable 5, Opus & Sonnet 5** (5 graduations) : insere xhigh (4, orange) entre high et max (xhigh existe a partir d'Opus 4.7, sur Fable 5 et sur Sonnet 5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
   - **Haiku** : pas d'indicateur (le modele n'a pas de niveau d'effort)
+  - Niveau absent, `default` ou inconnu → rendu comme `medium`
 - Nom du sub-agent (si applicable)
 - Mode vim (`[N]`/`[I]`)
 - Nom du projet courant
@@ -35,17 +36,19 @@ Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 - Cout de la session courante (USD)
 - Duree de la session
 - Branche git avec fichiers staged (`+`), modifies (`~`), untracked (`?`), commits non pousses (`↑` cyan) et commits remote non recuperes (`↓` jaune)
-- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (background POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-*-fetch-*`)
+- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (`& disown` — le statusline tourne sous bash, contrairement au hook `UserPromptSubmit` decrit plus bas qui doit rester POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-<uid>-fetch-<cksum>`)
 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
 - Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel**
-- **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable 5 a sa propre limite hebdo, exposee par l'API dans `limits[]` (entree `weekly_scoped` avec `scope.model.display_name = "Fable"`). Le segment est masque si le compte n'a pas de limite dediee
+- **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable 5 a sa propre limite hebdo, exposee par l'API dans `limits[]` (premiere entree `weekly_scoped` dont `scope.model.display_name` **contient** `fable` — test regex insensible a la casse, pas une egalite stricte). Le segment est masque si le compte n'a pas de limite dediee
 - Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances)
 
 ## Calcul des couts
 
-Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic.
+Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic. Le scan est limite aux fichiers modifies dans les 7 derniers jours (`find -mtime -7`) et ne retient que les messages `type == "assistant"` posterieurs au debut de la fenetre hebdo.
+
+Les messages sont **dedupliques par `requestId`** (`group_by(.reqId) | map(last)`) : le streaming ecrit plusieurs lignes JSONL pour une meme requete, seule la derniere porte les compteurs de tokens definitifs.
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
 
@@ -55,7 +58,7 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 |---|---|---|---|---|---|
 | **Fable 5** (flagship) | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 4.5 / 4.6 / 4.7 / 4.8** | $5 | $25 | $6.25 | $10 | $0.50 |
-| **Opus 4.7 Fast** (et 4.6 avant 29/06/26) | $30 | $150 | $37.50 | $60 | $3 |
+| **Opus 4.5 / 4.6 / 4.7 Fast** (`speed: fast`) | $30 | $150 | $37.50 | $60 | $3 |
 | **Opus 4.8 Fast** | $10 | $50 | $12.50 | $20 | $1 |
 | **Sonnet 5** (promo → 31/08/26) | $2 | $10 | $2.50 | $4 | $0.20 |
 | **Sonnet 5** (standard 01/09/26 →) | $3 | $15 | $3.75 | $6 | $0.30 |
@@ -67,9 +70,26 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 > Fast mode : Opus 4.7 ($30/$150) et Opus 4.8 ($10/$50, tarif reduit). Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis) ; le calcul suit le champ `speed` reel de chaque message.
 > **Sonnet 5** est en tarif promo ($2/$10) jusqu'au 31/08/2026, puis $3/$15 — la bascule est automatique selon la date de chaque message (`.ts`), sans fast mode.
 
+#### Matching des modeles
+
+Le tarif est choisi par test successif sur la chaine `.message.model` du JSONL, **premier match gagnant** :
+
+`fable|mythos` → `opus-4-8` → `opus-4-[567]` → `opus` → `haiku` → `sonnet-5` → fallback general.
+
+Deux consequences a garder en tete :
+
+- Le fallback general (modele non reconnu) applique le tarif **Sonnet 4.6** ($3/$15).
+- Le fallback `opus` applique le tarif **legacy** ($15/$75). Un futur `opus-4-9` non ajoute au script y tomberait et serait donc facture $15/$75 au lieu de $5/$25 — l'echelle d'effort est future-proof (elle matche `*Opus*`), la table de prix ne l'est pas.
+
 ### Session semaine alignee sur Anthropic
 
-Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-session` pour eviter les derives du `resets_at` (API rolling). La fenetre ne se recalcule que lorsque la session expire reellement (`now >= resets_at`).
+Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-session` pour eviter les derives du `resets_at` (API rolling). La fenetre est recalculee dans trois cas :
+
+1. la session a reellement expire (`now >= resets_at` stocke) ;
+2. l'API renvoie un `resets_at` different de celui stocke (reset server-side anticipe par Anthropic) ;
+3. premier run — aucun `resets_at` stocke, ou valeur illisible.
+
+Hors de ces cas, le `WEEK_START` persiste tel quel, meme si l'API fait glisser son `resets_at`.
 
 ### Fast mode
 
@@ -100,7 +120,7 @@ Prerequis : Node 18+. L'installer :
 
 ### Linux / WSL2
 
-Dependances attendues : `jq`, `curl`, `git`, `bash 4+`. L'installer refuse de continuer si l'une manque et propose la commande apt/pacman/dnf adaptee.
+Dependances attendues : `jq`, `curl`, `git`, `bash 4+`. L'installer controle `jq`, `curl` et `git` : il refuse de continuer si l'un manque, et propose la commande apt/pacman/dnf adaptee. `bash 4+` n'est **pas** verifie a l'install (il est presume present sur Linux/WSL2) ; seule la commande `doctor` le remonte, a titre de diagnostic.
 
 ```bash
 npx github:jeremywtp/statusline-claude-code
@@ -108,14 +128,15 @@ npx github:jeremywtp/statusline-claude-code
 
 ### macOS (Intel + Apple Silicon)
 
-Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `date -d`, `md5sum`, `grep -oP`, et depend de Bash 5+). L'installer macOS :
+Le script d'origine utilise des commandes GNU incompatibles BSD (`stat -c`, `date -d`, `grep -oP`, `find -mmin`, et depend de Bash 5+). L'installer macOS :
 
 1. verifie Homebrew (refuse si absent et renvoie la commande d'install Homebrew)
 2. detecte Apple Silicon (`/opt/homebrew`) ou Intel (`/usr/local`)
 3. `brew install coreutils findutils grep bash jq curl git` pour ce qui manque seulement
-4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`md5sum`/`grep`/`find` vers leurs equivalents GNU (`gstat`, `gdate`, `gmd5sum`, `ggrep`, `gfind`) — le verrou API utilise `mkdir` (atomique, natif partout), aucune dependance a `flock`
+4. insere un **shim de compatibilite** dans `statusline.sh` qui redirige `stat`/`date`/`grep`/`find` vers leurs equivalents GNU (`gstat`, `gdate`, `ggrep`, `gfind`). Le shim couvre aussi `md5sum` → `gmd5sum` par precaution, mais le script ne l'appelle plus : le hachage des chemins passe par `cksum` (POSIX, natif BSD). Le verrou API utilise `mkdir` (atomique, natif partout), aucune dependance a `flock`
 5. reecrit le shebang vers Bash 5+ Homebrew (macOS livre `/bin/bash` en 3.2)
-6. lit le token OAuth dans le **Keychain** (`security find-generic-password -s "Claude Code-credentials"`) en fallback de `~/.claude/.credentials.json` — Claude Code stocke le token dans le Keychain par defaut sur Mac, alors que sur Linux/WSL il l'ecrit dans le fichier
+
+Une fois installe, c'est **`statusline.sh` lui-meme** (pas l'installer) qui lit le token OAuth dans le **Keychain** (`security find-generic-password -s "Claude Code-credentials"`), en fallback de `~/.claude/.credentials.json` : Claude Code stocke le token dans le Keychain par defaut sur Mac, alors que sur Linux/WSL il l'ecrit dans le fichier. La commande `doctor` verifie la presence de l'un ou de l'autre.
 
 Prerequis : avoir [Homebrew](https://brew.sh) installe (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`).
 
@@ -220,18 +241,22 @@ Le commentaire shell `# scc-fetch-hook` est un marqueur inerte qui sert a `npx .
 
 ## Fichiers et cache
 
+Tous les fichiers `/tmp` sont prefixes par l'UID de l'utilisateur (`/tmp/claude-sl-$(id -u)-...`, multi-user safe) — note `<uid>` ci-dessous. Les caches par repertoire sont suffixes par le `cksum` du chemin du projet.
+
 | Fichier | Description | TTL |
 |---|---|---|
 | `~/.claude/statusline.sh` | Script principal | — |
 | `~/.claude/settings.json` | Config Claude Code (statusLine) | — |
 | `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
-| `~/.claude/usage-session` | Persistance durable API usage (%, timers) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
-| `/tmp/claude-sl-usage-cache` | Cache API OAuth (quotas 5h/7j/Fable + couts, 7 champs) | 300s |
-| `/tmp/claude-sl-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
-| `/tmp/claude-sl-usage.lock.d` | Verrou mkdir — un seul appel API a la fois (multi-instances, casse si orphelin > 30s) | — |
-| `/tmp/claude-sl-git-*` | Cache git status par repertoire (incl. `↑N ↓N` ahead/behind) | 5s |
-| `/tmp/claude-sl-fetch-*` | Lock auto-fetch par repertoire — empeche les fetch trop frequents | 300s |
-| `/tmp/claude-sl-status-cache` | Cache status Claude (status.claude.com) | 60s |
+| `~/.claude/usage-session` | Persistance durable API usage (5 champs : %, timers, quota Fable) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
+| `/tmp/claude-sl-<uid>-usage-cache` | Cache API OAuth (quotas 5h/7j/Fable + couts, 7 champs) | 300s |
+| `/tmp/claude-sl-<uid>-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
+| `/tmp/claude-sl-<uid>-usage.lock.d` | Verrou mkdir — un seul appel API a la fois (multi-instances, casse si orphelin > 30s) | — |
+| `/tmp/claude-sl-<uid>-git-<cksum>` | Cache git status par repertoire (incl. `↑N ↓N` ahead/behind) | 5s |
+| `/tmp/claude-sl-<uid>-fetch-<cksum>` | Lock auto-fetch par repertoire — empeche les fetch trop frequents | 300s |
+| `/tmp/claude-sl-<uid>-status-cache` | Cache status Claude (status.claude.com) | 60s |
+| `/tmp/claude-sl-<uid>-week-raw-XXXXXX` | `mktemp` par process — lignes JSONL brutes de la fenetre hebdo. Supprime en fin de calcul ; les orphelins de plus de 5 min sont purges au run suivant | Ephemere |
+| `/tmp/claude-sl-<uid>-api-XXXXXX` | `mktemp` par process — corps de la reponse API OAuth, supprime apres lecture | Ephemere |
 
 ## Resilience API
 
@@ -248,7 +273,9 @@ Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
 
 ## Fonctionnement
 
-Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse avec `jq` pour extraire les infos du modele, du contexte, de la session et du git.
+Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse en **un seul appel `jq`** pour en extraire le modele, le contexte, la session (cout, duree), le repertoire, la version, l'agent, le mode vim, le chemin du transcript et l'effort level.
+
+Le git n'est **pas** dans ce JSON : la branche et les compteurs (staged / modifies / untracked, ahead / behind) sont obtenus en lancant de vraies commandes `git` dans le repertoire transmis par le JSON (`workspace.current_dir`).
 
 Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (300s) en scannant les fichiers JSONL du repertoire `~/.claude/projects/` (batch `find -exec +` pour performance).
 
@@ -267,7 +294,11 @@ Claude Code applique l'effort level dans cet ordre (le premier qui matche gagne)
 3. **`effortLevel` dans `~/.claude/settings.json`** — baseline persistante.
 4. **Defaut modele** — `xhigh` sur Opus 4.7, `high` sur Opus 4.8, `medium` ailleurs.
 
-La statusline lit en priorite le champ **`.effort.level` du JSON stdin** transmis par Claude Code : c'est la valeur live deja resolue (elle reflete `/effort` en cours de session, l'env var, `settings.json` et le defaut modele). Cas particulier **ultracode** : Claude Code le mappe en interne sur `xhigh`, donc `.effort.level` renvoie `xhigh` (indistinct d'un vrai xhigh) ; pour l'afficher distinctement (`▌▌▌▌▌ ✦`), la statusline ne leve l'ambiguite que dans ce cas, en lisant le dernier `Set effort level to ultracode` du transcript. Si `.effort.level` est absent (Claude Code trop ancien, ou modele sans effort comme Haiku), elle retombe sur le fallback historique : `/effort` dans le transcript > `settings.json` > env var.
+La statusline lit en priorite le champ **`.effort.level` du JSON stdin** transmis par Claude Code : c'est la valeur live deja resolue (elle reflete `/effort` en cours de session, l'env var, `settings.json` et le defaut modele). Cas particulier **ultracode** : Claude Code le mappe en interne sur `xhigh`, donc `.effort.level` renvoie `xhigh` (indistinct d'un vrai xhigh) ; pour l'afficher distinctement (`▌▌▌▌▌ ✦`), la statusline ne leve l'ambiguite que dans ce cas, en lisant le dernier `Set effort level to ultracode` du transcript.
+
+Si `.effort.level` est absent (Claude Code trop ancien, ou modele sans effort comme Haiku), elle retombe sur le fallback historique. Sa preseance est **`CLAUDE_CODE_EFFORT_LEVEL` > `/effort` dans le transcript > `effortLevel` de `settings.json`** : le script lit les trois sources dans l'ordre inverse, chacune ecrasant la precedente, donc c'est bien la derniere lue (l'env var) qui gagne. Cet ordre reproduit celui de Claude Code decrit ci-dessus.
+
+Le transcript est interroge avec deux patterns : d'abord `Set effort level to <X>` (ecrit lors d'un `/effort`), puis en repli `(current )?effort level: <X>` (lookahead 50 chars) qui couvre l'affichage de `/effort` sans argument.
 
 **Detail technique du pattern grep `/effort`** : Claude Code ecrit deux formats distincts dans `local-command-stdout` selon que le niveau est persistant ou session-only :
 
