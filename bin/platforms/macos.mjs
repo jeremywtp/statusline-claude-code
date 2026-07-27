@@ -257,7 +257,7 @@ export async function install({ statuslineSrc, flags }) {
   log.info('');
   log.info(`${C.dim}Tester manuellement :${C.reset}`);
   log.info(
-    `  echo '{"model":{"display_name":"Opus 4.8"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
+    `  echo '{"model":{"display_name":"Opus 5"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
   );
   log.info('');
 }

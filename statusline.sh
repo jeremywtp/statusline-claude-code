@@ -558,7 +558,7 @@ if usage_cache_stale && ! usage_in_backoff; then
           cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
     if [ -s "$WEEK_TMP" ]; then
-      # Prix officiels Anthropic (USD / MTok) — verifie juillet 2026 (Fable 5, Opus 4.8, Sonnet 5 inclus)
+      # Prix officiels Anthropic (USD / MTok) — verifie juillet 2026 (Fable 5, Opus 5, Opus 4.8, Sonnet 5 inclus)
       WEEK_COST=$(jq -sc '
         group_by(.reqId) | map(last) |
         map(
@@ -569,9 +569,10 @@ if usage_cache_stale && ! usage_in_backoff; then
             # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
-          elif (.model // "" | test("opus-4-8")) then
-            # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
-            # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
+          elif (.model // "" | test("opus-5|opus-4-8")) then
+            # Opus 5 et Opus 4.8 : memes tarifs, standard $5/$25 et fast $10/$50
+            # (fast 3x moins cher que celui de 4.6/4.7 a $30/$150).
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le prix input.
             if .speed == "fast" then
               ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
             else
@@ -626,9 +627,10 @@ if usage_cache_stale && ! usage_in_backoff; then
             # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
-          elif (.model // "" | test("opus-4-8")) then
-            # Opus 4.8 : fast mode 3x moins cher que 4.6/4.7 ($10/$50 vs $30/$150).
-            # Caches = multiplicateurs officiels sur le prix input fast (x1.25 / x2 / x0.1).
+          elif (.model // "" | test("opus-5|opus-4-8")) then
+            # Opus 5 et Opus 4.8 : memes tarifs, standard $5/$25 et fast $10/$50
+            # (fast 3x moins cher que celui de 4.6/4.7 a $30/$150).
+            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le prix input.
             if .speed == "fast" then
               ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
             else

@@ -5,7 +5,7 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 ## Preview
 
 ```
-Opus 4.8 (1M context) ▌▌▌▌▌ │ my-project │ v2.1.75 ●
+Opus 5 ▌▌▌▌▌ │ my-project │ v2.1.75 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▱▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50 │ Fable 14%
 ```
@@ -57,9 +57,10 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
 | **Fable 5** (flagship) | $10 | $50 | $12.50 | $20 | $1 |
+| **Opus 5** | $5 | $25 | $6.25 | $10 | $0.50 |
+| **Opus 5 / Opus 4.8 Fast** (`speed: fast`) | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 4.5 / 4.6 / 4.7 / 4.8** | $5 | $25 | $6.25 | $10 | $0.50 |
 | **Opus 4.5 / 4.6 / 4.7 Fast** (`speed: fast`) | $30 | $150 | $37.50 | $60 | $3 |
-| **Opus 4.8 Fast** | $10 | $50 | $12.50 | $20 | $1 |
 | **Sonnet 5** (promo → 31/08/26) | $2 | $10 | $2.50 | $4 | $0.20 |
 | **Sonnet 5** (standard 01/09/26 →) | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Sonnet 4.6** | $3 | $15 | $3.75 | $6 | $0.30 |
@@ -67,14 +68,14 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 | Opus legacy (4 / 4.1) | $15 | $75 | $18.75 | $30 | $1.50 |
 
 > **Fable 5** — et **Mythos 5** (Project Glasswing, meme tier et meme tarif) — est au-dessus d'Opus (le modele le plus puissant) : $10/$50, sans fast mode.
-> Fast mode : Opus 4.7 ($30/$150) et Opus 4.8 ($10/$50, tarif reduit). Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis) ; le calcul suit le champ `speed` reel de chaque message.
+> Fast mode : Opus 5 et Opus 4.8 ($10/$50, tarif reduit). Opus 4.7 fast ($30/$150) est retire (erreur API desormais, tarif conserve pour les messages historiques) ; Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis) ; le calcul suit le champ `speed` reel de chaque message.
 > **Sonnet 5** est en tarif promo ($2/$10) jusqu'au 31/08/2026, puis $3/$15 — la bascule est automatique selon la date de chaque message (`.ts`), sans fast mode.
 
 #### Matching des modeles
 
 Le tarif est choisi par test successif sur la chaine `.message.model` du JSONL, **premier match gagnant** :
 
-`fable|mythos` → `opus-4-8` → `opus-4-[567]` → `opus` → `haiku` → `sonnet-5` → fallback general.
+`fable|mythos` → `opus-5|opus-4-8` → `opus-4-[567]` → `opus` → `haiku` → `sonnet-5` → fallback general.
 
 Deux consequences a garder en tete :
 
@@ -93,7 +94,7 @@ Hors de ces cas, le `WEEK_START` persiste tel quel, meme si l'API fait glisser s
 
 ### Fast mode
 
-Le fast mode (x6 sur Opus 4.6/4.7, x2 sur Opus 4.8) est detecte de deux manieres :
+Le fast mode (x6 sur Opus 4.6/4.7, x2 sur Opus 5 et Opus 4.8) est detecte de deux manieres :
 - **Affichage ⚡** : lit `fastMode` dans `~/.claude/settings.json` (session courante)
 - **Calcul cout** : lit le champ `speed` de chaque requete dans les JSONL (historique precis)
 
