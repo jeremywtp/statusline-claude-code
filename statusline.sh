@@ -38,7 +38,7 @@ BYELLOW='\033[38;5;227m'
 BCYAN='\033[38;5;51m'
 ORANGE='\033[38;5;208m'
 UMAGENTA='\033[38;5;201m'  # magenta vif — reserve a ultracode (effort "ultra")
-GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable 5 (modele flagship, tier au-dessus d'Opus)
+GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable / Mythos (5 et 5.1, tier flagship au-dessus d'Opus)
 
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
@@ -75,7 +75,7 @@ CTX_PCT_INT=$(printf '%.0f' "$CTX_PCT" 2>/dev/null) || CTX_PCT_INT=0
 
 # --- Couleur du modele ---
 case "$MODEL_NAME" in
-  *Fable*|*fable*)   MC="$GOLD" ;;
+  *Fable*|*fable*|*Mythos*|*mythos*) MC="$GOLD" ;;
   *Opus*|*opus*)     MC="$MAGENTA" ;;
   *Sonnet*|*sonnet*) MC="$BLUE" ;;
   *Haiku*|*haiku*)   MC="$CYAN" ;;
@@ -206,8 +206,8 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : aucune barre | Fable 5 + Opus (toutes versions) + Sonnet 5 : echelle 5
-# niveaux (xhigh dispo des Opus 4.7, sur Fable 5 et sur Sonnet 5) | Sonnet 4.6 &
+# Haiku : aucune barre | Fable / Mythos (5 et 5.1) + Opus (toutes versions) + Sonnet 5 :
+# echelle 5 niveaux (xhigh dispo des Opus 4.7, sur Fable / Mythos et sur Sonnet 5) | Sonnet 4.6 &
 # autres : 4 niveaux. On matche tous les Opus plutot qu'une version precise :
 # future-proof (4.8, 4.9...) et sans piege de comparaison de version (4.10 < 4.7 en
 # flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc la 4e graduation reste
@@ -217,7 +217,7 @@ case "$MODEL_NAME" in
   *Haiku*|*haiku*)
     : # pas d'indicateur d'effort sur Haiku
     ;;
-  *Fable*|*fable*|*Opus*|*opus*|*"Sonnet 5"*|*"sonnet 5"*)
+  *Fable*|*fable*|*Mythos*|*mythos*|*Opus*|*opus*|*"Sonnet 5"*|*"sonnet 5"*)
     # 5 niveaux : low, medium, high, xhigh, max
     case "$EFFORT_LEVEL" in
       low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
@@ -545,27 +545,65 @@ if usage_cache_stale && ! usage_in_backoff; then
     # find ne dereference pas sans lui.
     find "${_SL_PREFIX%/*}/" -maxdepth 1 -name "${_SL_PREFIX##*/}-week-raw-*" -mmin +5 -delete 2>/dev/null || true
     WEEK_TMP=$(mktemp "${_SL_PREFIX}-week-raw-XXXXXX")
+    # Un enregistrement par LIGNE JSONL (cle reqId nue, la dedup par requete se fait plus
+    # bas : derniere ligne = compteurs definitifs), portant un tableau attempts des tentatives
+    # facturables. Cas normal : 1 tentative = usage de premier niveau. Cas fallback cote
+    # serveur (refus Fable -> modele de repli) : usage.iterations est le registre officiel de
+    # facturation, chaque tentative etant facturee au tarif de SON modele ; une tentative sans
+    # aucun output (refus avant le premier token) n'est pas facturee, de meme qu'un refus sec
+    # (stop_reason refusal sans output) hors fallback -> attempts vide, ce qui neutralise aussi
+    # les lignes de streaming intermediaires de la meme requete.
     find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 -exec \
       jq -c --arg tw "$WEEK_START" \
         'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
-         (.message.usage.input_tokens // 0) as $in |
-         (.message.usage.cache_creation.ephemeral_5m_input_tokens // 0) as $c5 |
-         (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0) as $c1 |
-         (.message.usage.cache_read_input_tokens // 0) as $cr |
-         {ts: .timestamp, reqId: .requestId, model: .message.model,
-          speed: (.message.usage.speed // "standard"),
-          input: $in, output: (.message.usage.output_tokens // 0),
-          cache_5m: $c5, cache_1h: $c1, cache_read: $cr}' {} + > "$WEEK_TMP" 2>/dev/null || true
+         .message.model as $m | (.message.usage.speed // "standard") as $sp |
+         (.message.usage.iterations // []) as $its |
+         {ts: .timestamp, reqId: (.requestId // ""),
+          web_search: (.message.usage.server_tool_use.web_search_requests // 0),
+          attempts: (
+            if ($its | length) > 1 then
+              [ $its[] | select((.output_tokens // 0) > 0) |
+                {model: (.model // $m), speed: $sp,
+                 input: (.input_tokens // 0), output: (.output_tokens // 0),
+                 cache_5m: (.cache_creation.ephemeral_5m_input_tokens // 0),
+                 cache_1h: (.cache_creation.ephemeral_1h_input_tokens // 0),
+                 cache_read: (.cache_read_input_tokens // 0)} ]
+            elif ((.message.stop_reason // "") == "refusal") and ((.message.usage.output_tokens // 0) == 0) then
+              []
+            else
+              [ .message.usage |
+                {model: $m, speed: $sp,
+                 input: (.input_tokens // 0), output: (.output_tokens // 0),
+                 cache_5m: (.cache_creation.ephemeral_5m_input_tokens // 0),
+                 cache_1h: (.cache_creation.ephemeral_1h_input_tokens // 0),
+                 cache_read: (.cache_read_input_tokens // 0)} ]
+            end)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
-    if [ -s "$WEEK_TMP" ]; then
-      # Prix officiels Anthropic (USD / MTok) — verifie juillet 2026 (Fable 5, Opus 5, Opus 4.8, Sonnet 5 inclus)
-      WEEK_COST=$(jq -sc '
+    # Prix officiels Anthropic (USD / MTok) — verifies le 03/09/2026 sur
+    # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5, Opus 4.8,
+    # Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2 input,
+    # read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 ou read = x0.025.
+    # Source UNIQUE partagee par les couts 7j et 5h : les deux jq plus bas l'injectent telle
+    # quelle (chaine shell simple quote : pas d'apostrophe dans les commentaires jq).
+    # Etape 1 : dedup par requete (le streaming ecrit plusieurs lignes JSONL par requete, seule
+    # la derniere porte les compteurs definitifs). Etape 2 : une entree par tentative facturable
+    # (attempts), le web search etant rattache a la derniere tentative, celle qui a servi la
+    # reponse. Etape 3 : tarif par modele.
+    COST_MAP_JQ='
         group_by(.reqId) | map(last) |
+        [ .[] | . as $r | $r.attempts | to_entries[] |
+          .value + {web_search: (if .key == (($r.attempts | length) - 1) then $r.web_search else 0 end)} ] |
         map(
           .input as $in | .output as $out |
           .cache_5m as $c5 | .cache_1h as $c1 |
-          .cache_read as $cr |
-          if (.model // "" | test("fable|mythos")) then
+          .cache_read as $cr | (.web_search // 0) as $ws |
+          # Web search cote serveur : $10 / 1000 requetes quel que soit le modele (web fetch gratuit).
+          ($ws * 0.01) +
+          if (.model // "" | test("fable-5-1|mythos-5-1")) then
+            # Fable 5.1 / Mythos 5.1 (sortis le 01/09/2026) : memes $10/$50 et caches write que
+            # Fable 5, mais cache read a $0.25 (x0.025 : seule exception au x0.1). Pas de fast mode.
+            ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*0.25) / 1000000
+          elif (.model // "" | test("fable|mythos")) then
             # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
@@ -579,29 +617,40 @@ if usage_cache_stale && ! usage_in_backoff; then
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
           elif (.model // "" | test("opus-4-[567]")) then
+            # Opus 4.5 / 4.6 / 4.7 : standard $5/$25. Le fast $30/$150 est retire (4.7 renvoie une
+            # erreur, 4.6 tourne en standard avec usage.speed = standard, 4.5 ne l a jamais eu) :
+            # la sous-branche fast ne sert plus que pour d eventuels messages historiques.
             if .speed == "fast" then
               ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
-          elif (.model // "" | test("opus")) then
+          elif (.model // "" | test("opus-4-1-|opus-4-2025")) then
+            # Opus 4 (claude-opus-4-20250514) et Opus 4.1 (claude-opus-4-1-20250805) : tarif legacy
+            # $15/$75. Retires le 15/06 et le 05/08/2026, conserves pour les messages historiques.
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
+          elif (.model // "" | test("opus")) then
+            # Tout autre Opus (futur opus-4-9, opus-6...) : tarif Opus courant $5/$25 (un opus-5-x
+            # est capture plus haut par opus-5, fast compris).
+            # Les seuls Opus legacy ($15/$75) sont captures explicitement juste au-dessus.
+            ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
           elif (.model // "" | test("haiku")) then
+            # Haiku 4.5 : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont retires depuis fevrier / avril 2026.
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
           elif (.model // "" | test("sonnet-5")) then
-            # Sonnet 5 : promo $2/$10 avant le 01/09/2026, puis standard $3/$15 (bascule 01/09).
-            # Prix selon la date du message (.ts) - comparaison de chaine ISO, pas de dep a date.
-            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input en vigueur.
-            if .ts < "2026-09-01T00:00:00Z" then
-              ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
-            else
-              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
-            end
+            # Sonnet 5 : $2/$10 definitif. Le tarif de lancement (annonce jusqu au 31/08/2026) est
+            # devenu le tarif standard, la hausse a $3/$15 prevue le 01/09/2026 est annulee.
+            # Pas de fast mode. Caches = multiplicateurs officiels (x1.25 / x2 / x0.1).
+            ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
           else
+            # Fallback general : Sonnet 4.6 / 4.5 et tout ID non reconnu, $3/$15.
             ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
           end
         ) | add // 0
-      ' "$WEEK_TMP" 2>/dev/null) || WEEK_COST="0"
+    '
+
+    if [ -s "$WEEK_TMP" ]; then
+      WEEK_COST=$(jq -sc "$COST_MAP_JQ" "$WEEK_TMP" 2>/dev/null) || WEEK_COST="0"
     else
       WEEK_COST="0"
     fi
@@ -616,50 +665,7 @@ if usage_cache_stale && ! usage_in_backoff; then
       BLOCK_START=$(date -u -d "now - 5 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
     fi
     if [ -n "$BLOCK_START" ] && [ -s "$WEEK_TMP" ]; then
-      BLOCK_COST=$(jq -sc --arg bs "$BLOCK_START" '
-        [ .[] | select(.ts > $bs) ] |
-        group_by(.reqId) | map(last) |
-        map(
-          .input as $in | .output as $out |
-          .cache_5m as $c5 | .cache_1h as $c1 |
-          .cache_read as $cr |
-          if (.model // "" | test("fable|mythos")) then
-            # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
-            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
-            ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
-          elif (.model // "" | test("opus-5|opus-4-8")) then
-            # Opus 5 et Opus 4.8 : memes tarifs, standard $5/$25 et fast $10/$50
-            # (fast 3x moins cher que celui de 4.6/4.7 a $30/$150).
-            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le prix input.
-            if .speed == "fast" then
-              ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
-            else
-              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
-            end
-          elif (.model // "" | test("opus-4-[567]")) then
-            if .speed == "fast" then
-              ($in*30 + $out*150 + $c5*37.5 + $c1*60 + $cr*3) / 1000000
-            else
-              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
-            end
-          elif (.model // "" | test("opus")) then
-            ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
-          elif (.model // "" | test("haiku")) then
-            ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
-          elif (.model // "" | test("sonnet-5")) then
-            # Sonnet 5 : promo $2/$10 avant le 01/09/2026, puis standard $3/$15 (bascule 01/09).
-            # Prix selon la date du message (.ts) - comparaison de chaine ISO, pas de dep a date.
-            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input en vigueur.
-            if .ts < "2026-09-01T00:00:00Z" then
-              ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
-            else
-              ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
-            end
-          else
-            ($in*3 + $out*15 + $c5*3.75 + $c1*6 + $cr*0.3) / 1000000
-          end
-        ) | add // 0
-      ' "$WEEK_TMP" 2>/dev/null) || BLOCK_COST="0"
+      BLOCK_COST=$(jq -sc --arg bs "$BLOCK_START" "[ .[] | select(.ts > \$bs) ] | $COST_MAP_JQ" "$WEEK_TMP" 2>/dev/null) || BLOCK_COST="0"
     fi
 
     rm -f "$WEEK_TMP"
