@@ -192,10 +192,15 @@ export async function install({ statuslineSrc, flags }) {
   };
   const gnuBin = `${brewPrefix}/bin`;
   const toInstall = new Set();
+  // curl et git n'ont pas besoin de la version Homebrew : celle de macOS (/usr/bin) suffit.
+  // curl Homebrew est de plus "keg-only", jamais lie dans <prefix>/bin : sans ce test,
+  // chaque installation relancait `brew install curl` (et la mise a jour de ses dependances).
+  const systemOk = new Set(['curl', 'git']);
 
   for (const [bin, formula] of Object.entries(bins)) {
     const p = `${gnuBin}/${bin}`;
     if (existsSync(p)) log.ok(`${bin} (${formula})`);
+    else if (systemOk.has(bin) && has(bin)) log.ok(`${bin} (systeme)`);
     else {
       log.warn(`${bin} (${formula}) manquant`);
       toInstall.add(formula);
