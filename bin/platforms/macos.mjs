@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   readFileSync,
   writeFileSync,
@@ -257,7 +258,7 @@ export async function install({ statuslineSrc, flags }) {
   log.info('');
   log.info(`${C.dim}Tester manuellement :${C.reset}`);
   log.info(
-    `  echo '{"model":{"display_name":"Opus 5"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
+    `  echo '{"model":{"display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
   );
   log.info('');
 }
@@ -363,7 +364,14 @@ export async function doctor() {
   }
 
   log.step('\nCredentials (OAuth usage)');
-  const creds = join(CLAUDE_DIR, '.credentials.json');
+  // Profil actif, comme statusline.sh : CLAUDE_CONFIG_DIR (autre compte) ou ~/.claude. L'entree
+  // Keychain d'un autre profil porte le suffixe sha256(CLAUDE_CONFIG_DIR) sur 8 caracteres.
+  const profileDir = process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR;
+  const suffix = process.env.CLAUDE_CONFIG_DIR
+    ? '-' + createHash('sha256').update(process.env.CLAUDE_CONFIG_DIR).digest('hex').slice(0, 8)
+    : '';
+  log.info(`  profil : ${profileDir}`);
+  const creds = join(profileDir, '.credentials.json');
   if (existsSync(creds)) {
     log.ok('.credentials.json present');
   } else {
@@ -371,10 +379,10 @@ export async function doctor() {
     const user = process.env.USER || process.env.LOGNAME || '';
     try {
       execSync(
-        `security find-generic-password -s "Claude Code-credentials" -a "${user}" -w`,
+        `security find-generic-password -s "Claude Code-credentials${suffix}" -a "${user}" -w`,
         { stdio: 'pipe' }
       );
-      log.ok('Keychain "Claude Code-credentials" present');
+      log.ok(`Keychain "Claude Code-credentials${suffix}" present`);
     } catch {
       log.warn(".credentials.json + Keychain absents - les quotas 5h/7j ne s'afficheront pas");
     }

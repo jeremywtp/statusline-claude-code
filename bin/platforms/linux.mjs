@@ -156,7 +156,7 @@ export async function install({ statuslineSrc, flags }) {
   log.info('');
   log.info(`${C.dim}Tester manuellement :${C.reset}`);
   log.info(
-    `  echo '{"model":{"display_name":"Opus 5"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
+    `  echo '{"model":{"display_name":"Opus 5.5"},"workspace":{"current_dir":"/tmp"},"version":"test","cost":{"total_cost_usd":0}}' | ${STATUSLINE_DST}`
   );
   log.info('');
 }
@@ -233,7 +233,10 @@ export async function doctor() {
   }
 
   log.step('\nCredentials (OAuth usage)');
-  const creds = join(CLAUDE_DIR, '.credentials.json');
+  // Profil actif, comme statusline.sh : CLAUDE_CONFIG_DIR (autre compte) ou ~/.claude.
+  const profileDir = process.env.CLAUDE_CONFIG_DIR || CLAUDE_DIR;
+  log.info(`  profil : ${profileDir}`);
+  const creds = join(profileDir, '.credentials.json');
   if (existsSync(creds)) log.ok('.credentials.json present');
   else log.warn(".credentials.json absent - les quotas 5h/7j ne s'afficheront pas");
 }

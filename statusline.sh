@@ -43,15 +43,34 @@ GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable / Mythos (5 et 5.1, ti
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
 
-# --- Prefixe caches /tmp/ isole par UID (multi-user safe) ---
-_SL_PREFIX="/tmp/claude-sl-$(id -u 2>/dev/null || echo 0)"
+# --- Dossier du profil Claude : ~/.claude par defaut, ou celui d'un autre compte ---
+# Un second compte tourne avec CLAUDE_CONFIG_DIR=<profil> (ex. ~/.claude-compte2). Ses
+# fichiers durables (usage-session, week-session), ses identifiants Linux (.credentials.json)
+# et ses reglages sont lus dans CE dossier ; ses JSONL aussi (projects/, souvent un lien
+# symbolique vers ~/.claude/projects quand l'historique est partage entre comptes).
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# Suffixe propre au profil : sha256 du chemin CLAUDE_CONFIG_DIR sur 8 caracteres, vide pour le
+# profil par defaut. C'est le suffixe que Claude Code donne a l'entree Trousseau du profil sur
+# macOS ("Claude Code-credentials-<8 hex>") ; il isole aussi les caches /tmp. Sans lui, le
+# second compte afficherait le quota du premier.
+_PROFILE_SUFFIX=""
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then _PROFILE_HASH=$(printf '%s' "$CLAUDE_CONFIG_DIR" | sha256sum)
+  else _PROFILE_HASH=$(printf '%s' "$CLAUDE_CONFIG_DIR" | shasum -a 256); fi
+  _PROFILE_SUFFIX="-${_PROFILE_HASH:0:8}"
+fi
+
+# --- Prefixe caches /tmp/ isole par UID (multi-user safe) et par profil ---
+_SL_PREFIX="/tmp/claude-sl-$(id -u 2>/dev/null || echo 0)${_PROFILE_SUFFIX}"
 
 # --- Extraction JSON en un seul appel jq ---
 # Bug fix : eval "" retourne 0, donc le fallback || ne s'execute jamais.
 # On stocke la sortie jq d'abord, puis on teste si elle est non-vide.
 MODEL_NAME="---"; DIR="."; VERSION="---"; COST=0; DURATION_MS=0; CTX_PCT=0
-AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""; EFFORT_STDIN=""
+AGENT_NAME=""; VIM_MODE=""; TRANSCRIPT_PATH=""; EFFORT_STDIN=""; FAST_STDIN=""
 
+# FAST_STDIN : test explicite de null, car l'operateur // de jq traite false comme
+# absent (un fast mode coupe doit rester "false", pas une chaine vide).
 _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "MODEL_NAME=\(.model.display_name // "---")",
   @sh "DIR=\(.workspace.current_dir // .cwd // ".")",
@@ -62,7 +81,8 @@ _JQ_OUT=$(echo "$INPUT" | jq -r '
   @sh "AGENT_NAME=\(.agent.name // "")",
   @sh "VIM_MODE=\(.vim.mode // "")",
   @sh "TRANSCRIPT_PATH=\(.transcript_path // "")",
-  @sh "EFFORT_STDIN=\(.effort.level // "")"
+  @sh "EFFORT_STDIN=\(.effort.level // "")",
+  @sh "FAST_STDIN=\(if .fast_mode == null then "" else (.fast_mode | tostring) end)"
 ' 2>/dev/null) || true
 
 [ -n "$_JQ_OUT" ] && eval "$_JQ_OUT"
@@ -165,8 +185,15 @@ fi
 LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
 # Indicateurs Fast mode + Effort level
-# Fast mode : aucun champ dans le JSON stdin, lu dans settings.json.
-FAST_MODE=$(jq -r '.fastMode // false' "$HOME/.claude/settings.json" 2>/dev/null) || FAST_MODE="false"
+# Fast mode — source canonique : .fast_mode du JSON stdin, valeur LIVE de la session
+# (false sur un modele sans fast mode meme si /fast est memorise : seuls Opus 5.5,
+# Opus 5 et Opus 4.8 l'ont). Fallback settings.json si Claude Code est trop ancien
+# pour exposer ce champ.
+if [ -n "$FAST_STDIN" ]; then
+  FAST_MODE="$FAST_STDIN"
+else
+  FAST_MODE=$(jq -r '.fastMode // false' "$CLAUDE_DIR/settings.json" 2>/dev/null) || FAST_MODE="false"
+fi
 
 # Effort level — source canonique : .effort.level du JSON stdin. Valeur LIVE
 # resolue par Claude Code (reflete /effort en cours de session, et "ultra" =
@@ -185,7 +212,7 @@ if [ -n "$EFFORT_STDIN" ]; then
     [ "$_LAST_EFFORT" = "ultracode" ] && EFFORT_LEVEL="ultracode"
   fi
 else
-  EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$HOME/.claude/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
+  EFFORT_LEVEL=$(jq -r '.effortLevel // "default"' "$CLAUDE_DIR/settings.json" 2>/dev/null) || EFFORT_LEVEL="default"
   # Claude Code ecrit deux formats dans local-command-stdout selon que le niveau
   # est persistant ou session-only :
   #   - low/medium/high/xhigh : "Set effort level to <X>: <description>"
@@ -370,7 +397,7 @@ USAGE_CACHE_TTL=300
 USAGE_BACKOFF_FILE="${_SL_PREFIX}-usage-backoff"
 USAGE_BACKOFF_TTL=600
 USAGE_LOCK_DIR="${_SL_PREFIX}-usage.lock.d"
-USAGE_SESSION_FILE="$HOME/.claude/usage-session"
+USAGE_SESSION_FILE="$CLAUDE_DIR/usage-session"
 
 usage_cache_stale() {
   [ ! -f "$USAGE_CACHE" ] && return 0
@@ -401,12 +428,13 @@ if usage_cache_stale && ! usage_in_backoff; then
   # --- Appel API OAuth usage (verrou mkdir : un seul process a la fois) ---
   # Source du token : .credentials.json (Linux/WSL) ou Keychain (defaut macOS).
   OAUTH_TOKEN=""
-  if [ -f "$HOME/.claude/.credentials.json" ]; then
-    OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$HOME/.claude/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
+  if [ -f "$CLAUDE_DIR/.credentials.json" ]; then
+    OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // ""' "$CLAUDE_DIR/.credentials.json" 2>/dev/null) || OAUTH_TOKEN=""
   fi
   if [ -z "$OAUTH_TOKEN" ] && [ "$(uname)" = "Darwin" ]; then
-    # Claude Code stocke le token dans le Keychain par defaut sur macOS.
-    _KC_JSON=$(security find-generic-password -s "Claude Code-credentials" -a "$USER" -w 2>/dev/null) || _KC_JSON=""
+    # Claude Code stocke le token dans le Keychain par defaut sur macOS, dans une entree
+    # propre a chaque profil : jamais de repli sur celle du profil par defaut pour un autre compte.
+    _KC_JSON=$(security find-generic-password -s "Claude Code-credentials${_PROFILE_SUFFIX}" -a "$USER" -w 2>/dev/null) || _KC_JSON=""
     if [ -n "$_KC_JSON" ]; then
       OAUTH_TOKEN=$(printf '%s' "$_KC_JSON" | jq -r '.claudeAiOauth.accessToken // ""' 2>/dev/null) || OAUTH_TOKEN=""
     fi
@@ -489,7 +517,7 @@ if usage_cache_stale && ! usage_in_backoff; then
   fi
 
   # --- Couts session : calcul independant (JSONL locaux, pas l'API) ---
-  WEEK_SESSION_FILE="$HOME/.claude/week-session"
+  WEEK_SESSION_FILE="$CLAUDE_DIR/week-session"
   RESET_7D_RAW=""
   RESET_5H_RAW=""
   WEEK_START=""
@@ -548,12 +576,13 @@ if usage_cache_stale && ! usage_in_backoff; then
     # Un enregistrement par LIGNE JSONL (cle reqId nue, la dedup par requete se fait plus
     # bas : derniere ligne = compteurs definitifs), portant un tableau attempts des tentatives
     # facturables. Cas normal : 1 tentative = usage de premier niveau. Cas fallback cote
-    # serveur (refus Fable -> modele de repli) : usage.iterations est le registre officiel de
-    # facturation, chaque tentative etant facturee au tarif de SON modele ; une tentative sans
-    # aucun output (refus avant le premier token) n'est pas facturee, de meme qu'un refus sec
+    # serveur (refus Fable / Opus 5.5 / Opus 5 -> modele de repli) : usage.iterations est le
+    # registre officiel de facturation, chaque tentative etant facturee au tarif de SON modele et
+    # a SA vitesse (un repli peut surcharger speed ; a defaut, speed de la requete). Une tentative
+    # sans aucun output (refus avant le premier token) n'est pas facturee, de meme qu'un refus sec
     # (stop_reason refusal sans output) hors fallback -> attempts vide, ce qui neutralise aussi
     # les lignes de streaming intermediaires de la meme requete.
-    find "$HOME/.claude/projects/" -name "*.jsonl" -mtime -7 -exec \
+    find "$CLAUDE_DIR/projects/" -name "*.jsonl" -mtime -7 -exec \
       jq -c --arg tw "$WEEK_START" \
         'select(.type == "assistant" and .timestamp != null and .message.model != null and .timestamp > $tw) |
          .message.model as $m | (.message.usage.speed // "standard") as $sp |
@@ -563,7 +592,7 @@ if usage_cache_stale && ! usage_in_backoff; then
           attempts: (
             if ($its | length) > 1 then
               [ $its[] | select((.output_tokens // 0) > 0) |
-                {model: (.model // $m), speed: $sp,
+                {model: (.model // $m), speed: (.speed // $sp),
                  input: (.input_tokens // 0), output: (.output_tokens // 0),
                  cache_5m: (.cache_creation.ephemeral_5m_input_tokens // 0),
                  cache_1h: (.cache_creation.ephemeral_1h_input_tokens // 0),
@@ -579,10 +608,11 @@ if usage_cache_stale && ! usage_in_backoff; then
                  cache_read: (.cache_read_input_tokens // 0)} ]
             end)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
-    # Prix officiels Anthropic (USD / MTok) — verifies le 03/09/2026 sur
-    # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5, Opus 4.8,
-    # Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2 input,
-    # read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 ou read = x0.025.
+    # Prix officiels Anthropic (USD / MTok) — verifies le 22/09/2026 sur
+    # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5.5, Opus 5,
+    # Opus 4.8, Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2
+    # input, read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 (read x0.025) et Opus 5.5 (read x0.05).
+    # En fast mode, les memes multiplicateurs de cache s'appliquent au tarif input fast.
     # Source UNIQUE partagee par les couts 7j et 5h : les deux jq plus bas l'injectent telle
     # quelle (chaine shell simple quote : pas d'apostrophe dans les commentaires jq).
     # Etape 1 : dedup par requete (le streaming ecrit plusieurs lignes JSONL par requete, seule
@@ -607,6 +637,15 @@ if usage_cache_stale && ! usage_in_backoff; then
             # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
             # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+          elif (.model // "" | test("opus-5-5")) then
+            # Opus 5.5 (sorti le 22/09/2026) : standard $4/$20, fast $8/$40 (x2). Caches write aux
+            # multiplicateurs officiels (x1.25 / x2) mais cache read a x0.05 au lieu de x0.1 :
+            # $0.20 en standard, $0.40 en fast. Doit rester AVANT opus-5, qui le capturerait.
+            if .speed == "fast" then
+              ($in*8 + $out*40 + $c5*10 + $c1*16 + $cr*0.4) / 1000000
+            else
+              ($in*4 + $out*20 + $c5*5 + $c1*8 + $cr*0.2) / 1000000
+            end
           elif (.model // "" | test("opus-5|opus-4-8")) then
             # Opus 5 et Opus 4.8 : memes tarifs, standard $5/$25 et fast $10/$50
             # (fast 3x moins cher que celui de 4.6/4.7 a $30/$150).
@@ -625,15 +664,21 @@ if usage_cache_stale && ! usage_in_backoff; then
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
-          elif (.model // "" | test("opus-4-1-|opus-4-2025")) then
+          elif (.model // "" | test("opus-4-1[-@]|opus-4[-@]2025")) then
             # Opus 4 (claude-opus-4-20250514) et Opus 4.1 (claude-opus-4-1-20250805) : tarif legacy
             # $15/$75. Retires le 15/06 et le 05/08/2026, conserves pour les messages historiques.
+            # Le separateur @ couvre les IDs Google Cloud (claude-opus-4-1@20250805).
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("opus")) then
-            # Tout autre Opus (futur opus-4-9, opus-6...) : tarif Opus courant $5/$25 (un opus-5-x
+            # Tout autre Opus (futur opus-4-9, opus-6...) : hypothese au tarif Opus 4.5 a 5 ($5/$25,
+            # fast x2 comme Opus 5 / 4.8), a revalider a chaque sortie (un opus-5-x autre que 5.5
             # est capture plus haut par opus-5, fast compris).
             # Les seuls Opus legacy ($15/$75) sont captures explicitement juste au-dessus.
-            ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            if .speed == "fast" then
+              ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
+            else
+              ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
+            end
           elif (.model // "" | test("haiku")) then
             # Haiku 4.5 : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont retires depuis fevrier / avril 2026.
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
