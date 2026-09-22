@@ -179,6 +179,8 @@ npx github:jeremywtp/statusline-claude-code uninstall
 #   --no-fetch-hook    n'ajoute pas le hook (skip prompt en mode interactif)
 ```
 
+> **npx en cache ou npm 10.8** : pour forcer une version precise, ajouter `#<commit>` (`npx github:jeremywtp/statusline-claude-code#<sha>`). Si npx echoue avec `GitFetcher requires an Arborist constructor to pack a tarball` (bug de npm 10.8, vu sous Ubuntu avec node 20), passer par l'archive GitHub, qui ne demande pas git : `npx https://codeload.github.com/jeremywtp/statusline-claude-code/tar.gz/main` (ou `/tar.gz/<sha>`), suivi de la commande voulue (`install`, `doctor`...).
+
 ### Installation manuelle (fallback)
 
 Si l'installer npx ne convient pas, voir `bin/platforms/linux.mjs` et `bin/shims/macos.sh` pour les etapes exactes — ou simplement :
