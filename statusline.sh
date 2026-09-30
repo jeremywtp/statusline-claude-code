@@ -233,12 +233,13 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : aucune barre | Fable / Mythos (5 et 5.1) + Opus (toutes versions) + Sonnet 5 :
-# echelle 5 niveaux (xhigh dispo des Opus 4.7, sur Fable / Mythos et sur Sonnet 5) | Sonnet 4.6 &
-# autres : 4 niveaux. On matche tous les Opus plutot qu'une version precise :
+# Haiku : aucune barre | Fable / Mythos (5 et 5.1) + Opus (toutes versions) + Sonnet 5 / 5.5 :
+# echelle 5 niveaux (xhigh dispo des Opus 4.7, sur Fable / Mythos et sur Sonnet 5 / 5.5) |
+# Sonnet 4.6 & autres : 4 niveaux. On matche tous les Opus plutot qu'une version precise :
 # future-proof (4.8, 4.9...) et sans piege de comparaison de version (4.10 < 4.7 en
 # flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc la 4e graduation reste
-# inutilisee pour eux. Sonnet 5 est le premier Sonnet a supporter xhigh (5 niveaux).
+# inutilisee pour eux. Sonnet 5 est le premier Sonnet a supporter xhigh (5 niveaux) ; le
+# motif "Sonnet 5" capture aussi "Sonnet 5.5" (display_name de claude-sonnet-5-5).
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$MODEL_NAME" in
   *Haiku*|*haiku*)
@@ -576,7 +577,7 @@ if usage_cache_stale && ! usage_in_backoff; then
     # Un enregistrement par LIGNE JSONL (cle reqId nue, la dedup par requete se fait plus
     # bas : derniere ligne = compteurs definitifs), portant un tableau attempts des tentatives
     # facturables. Cas normal : 1 tentative = usage de premier niveau. Cas fallback cote
-    # serveur (refus Fable / Opus 5.5 / Opus 5 -> modele de repli) : usage.iterations est le
+    # serveur (refus Fable / Opus 5.5 / Opus 5 / Sonnet 5.5 -> modele de repli) : usage.iterations est le
     # registre officiel de facturation, chaque tentative etant facturee au tarif de SON modele et
     # a SA vitesse (un repli peut surcharger speed ; a defaut, speed de la requete). Une tentative
     # sans aucun output (refus avant le premier token) n'est pas facturee, de meme qu'un refus sec
@@ -608,9 +609,9 @@ if usage_cache_stale && ! usage_in_backoff; then
                  cache_read: (.cache_read_input_tokens // 0)} ]
             end)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
-    # Prix officiels Anthropic (USD / MTok) — verifies le 22/09/2026 sur
+    # Prix officiels Anthropic (USD / MTok) — verifies le 29/09/2026 sur
     # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5.5, Opus 5,
-    # Opus 4.8, Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2
+    # Opus 4.8, Sonnet 5.5, Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2
     # input, read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 (read x0.025) et Opus 5.5 (read x0.05).
     # En fast mode, les memes multiplicateurs de cache s'appliquent au tarif input fast.
     # Source UNIQUE partagee par les couts 7j et 5h : les deux jq plus bas l'injectent telle
@@ -683,8 +684,11 @@ if usage_cache_stale && ! usage_in_backoff; then
             # Haiku 4.5 : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont retires depuis fevrier / avril 2026.
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
           elif (.model // "" | test("sonnet-5")) then
-            # Sonnet 5 : $2/$10 definitif. Le tarif de lancement (annonce jusqu au 31/08/2026) est
-            # devenu le tarif standard, la hausse a $3/$15 prevue le 01/09/2026 est annulee.
+            # Sonnet 5 et Sonnet 5.5 (sorti le 28/09/2026, meme tarif) : $2/$10. La regex capture
+            # aussi claude-sonnet-5-5 : pas de branche dediee tant que les deux tarifs sont egaux
+            # (ecart mesure contre cost.total_cost_usd de Claude Code sur Sonnet 5.5 : 0 %).
+            # Le tarif de lancement de Sonnet 5 (annonce jusqu au 31/08/2026) est devenu le tarif
+            # standard, la hausse a $3/$15 prevue le 01/09/2026 est annulee.
             # Pas de fast mode. Caches = multiplicateurs officiels (x1.25 / x2 / x0.1).
             ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
           else
