@@ -233,19 +233,19 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku : aucune barre | Fable / Mythos (5 et 5.1) + Opus (toutes versions) + Sonnet 5 / 5.5 :
-# echelle 5 niveaux (xhigh dispo des Opus 4.7, sur Fable / Mythos et sur Sonnet 5 / 5.5) |
-# Sonnet 4.6 & autres : 4 niveaux. On matche tous les Opus plutot qu'une version precise :
-# future-proof (4.8, 4.9...) et sans piege de comparaison de version (4.10 < 4.7 en
-# flottant). Les Opus < 4.7 n'emettent jamais xhigh, donc la 4e graduation reste
-# inutilisee pour eux. Sonnet 5 est le premier Sonnet a supporter xhigh (5 niveaux) ; le
-# motif "Sonnet 5" capture aussi "Sonnet 5.5" (display_name de claude-sonnet-5-5).
+# Haiku 4.5 et anterieurs : aucune barre (pas de niveau d'effort) | Fable / Mythos (5 et 5.1)
+# + Opus (toutes versions) + Sonnet 5 / 5.5 + Haiku 5.5 : echelle 5 niveaux (xhigh dispo des
+# Opus 4.7, sur Fable / Mythos, sur Sonnet 5 / 5.5 et sur Haiku 5.5) | Sonnet 4.6 & autres :
+# 4 niveaux. On matche tous les Opus plutot qu'une version precise : future-proof (4.8, 4.9...)
+# et sans piege de comparaison de version (4.10 < 4.7 en flottant). Les Opus < 4.7 n'emettent
+# jamais xhigh, donc la 4e graduation reste inutilisee pour eux. Sonnet 5 est le premier Sonnet
+# a supporter xhigh (5 niveaux) ; le motif "Sonnet 5" capture aussi "Sonnet 5.5" (display_name
+# de claude-sonnet-5-5). Haiku 5.5 (display_name "Haiku 5.5", sorti le 07/10/2026) est le
+# premier Haiku a effort (low a max, xhigh compris, defaut medium) : son motif "Haiku 5" est
+# teste dans la branche 5 niveaux, AVANT le motif Haiku generique qui masque les barres.
 BAR_CHAR="\xe2\x96\x8c"  # ▌ left half block
 case "$MODEL_NAME" in
-  *Haiku*|*haiku*)
-    : # pas d'indicateur d'effort sur Haiku
-    ;;
-  *Fable*|*fable*|*Mythos*|*mythos*|*Opus*|*opus*|*"Sonnet 5"*|*"sonnet 5"*)
+  *Fable*|*fable*|*Mythos*|*mythos*|*Opus*|*opus*|*"Sonnet 5"*|*"sonnet 5"*|*"Haiku 5"*|*"haiku 5"*)
     # 5 niveaux : low, medium, high, xhigh, max
     case "$EFFORT_LEVEL" in
       low)     LINE1="${LINE1} $(printf '%b' "${CYAN}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
@@ -255,6 +255,9 @@ case "$MODEL_NAME" in
       ultra|ultracode) LINE1="${LINE1} $(printf '%b' "${UMAGENTA}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST} ${UMAGENTA}\xe2\x9c\xa6${RST}")" ;;
       *)       LINE1="${LINE1} $(printf '%b' "${BYELLOW}${BAR_CHAR}${BAR_CHAR}${DIM}${GRAY}${BAR_CHAR}${BAR_CHAR}${BAR_CHAR}${RST}")" ;;
     esac
+    ;;
+  *Haiku*|*haiku*)
+    : # pas d'indicateur d'effort sur Haiku 4.5 et anterieurs (Haiku 5.5 est capture au-dessus)
     ;;
   *)
     # 4 niveaux : low, medium, high, max (xhigh fallback sur high)
@@ -609,11 +612,14 @@ if usage_cache_stale && ! usage_in_backoff; then
                  cache_read: (.cache_read_input_tokens // 0)} ]
             end)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
-    # Prix officiels Anthropic (USD / MTok) — verifies le 29/09/2026 sur
+    # Prix officiels Anthropic (USD / MTok) — verifies le 07/10/2026 sur
     # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5.5, Opus 5,
-    # Opus 4.8, Sonnet 5.5, Sonnet 5 inclus). Regle des caches : write 5 min = x1.25 input, write 1h = x2
-    # input, read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 (read x0.025) et Opus 5.5 (read x0.05).
-    # En fast mode, les memes multiplicateurs de cache s'appliquent au tarif input fast.
+    # Opus 4.8, Sonnet 5.5, Sonnet 5, Haiku 5.5 inclus). Regle des caches : write 5 min = x1.25
+    # input, write 1h = x2 input, read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 (read x0.025) et
+    # Opus 5.5 (read x0.05). En fast mode, les memes multiplicateurs de cache s'appliquent au tarif
+    # input fast. Haiku 5.5 est le seul modele a tarif par palier de longueur de prompt (tout x5
+    # au-dela de 100K tokens de prompt, output compris) : le palier est evalue par tentative,
+    # exactement comme le fait Claude Code pour cost.total_cost_usd.
     # Source UNIQUE partagee par les couts 7j et 5h : les deux jq plus bas l'injectent telle
     # quelle (chaine shell simple quote : pas d'apostrophe dans les commentaires jq).
     # Etape 1 : dedup par requete (le streaming ecrit plusieurs lignes JSONL par requete, seule
@@ -680,8 +686,24 @@ if usage_cache_stale && ! usage_in_backoff; then
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
+          elif (.model // "" | test("haiku-5-5")) then
+            # Haiku 5.5 (sorti le 07/10/2026, cible de l alias haiku de Claude Code) : premier modele
+            # a tarif par palier de longueur de prompt. Prompt <= 100K tokens : $0.10/$0.50, caches
+            # $0.125 / $0.20 / $0.01 (multiplicateurs standards x1.25 / x2 / x0.1). Prompt > 100K :
+            # tout x5, output compris : $0.50/$2.50, caches $0.625 / $1 / $0.05. Le prompt = input +
+            # cache read + cache write (5 min et 1h), compare STRICTEMENT a 100 000, requete par
+            # requete (tentative par tentative), comme Claude Code (longPrompt.abovePromptTokens).
+            # Ecart mesure contre cost.total_cost_usd sur deux sessions reelles, une sous et une
+            # au-dessus du palier : 0 %. Pas de fast mode, pas de repli de refus. Doit rester AVANT
+            # haiku, qui le facturerait au tarif Haiku 4.5.
+            if ($in + $cr + $c5 + $c1) > 100000 then
+              ($in*0.5 + $out*2.5 + $c5*0.625 + $c1*1 + $cr*0.05) / 1000000
+            else
+              ($in*0.1 + $out*0.5 + $c5*0.125 + $c1*0.2 + $cr*0.01) / 1000000
+            end
           elif (.model // "" | test("haiku")) then
-            # Haiku 4.5 : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont retires depuis fevrier / avril 2026.
+            # Haiku 4.5 (et tout autre Haiku non reconnu) : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont
+            # retires depuis fevrier / avril 2026. Haiku 5.5 est capture juste au-dessus.
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
           elif (.model // "" | test("sonnet-5")) then
             # Sonnet 5 et Sonnet 5.5 (sorti le 28/09/2026, meme tarif) : $2/$10. La regex capture
