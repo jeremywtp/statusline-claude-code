@@ -39,10 +39,10 @@ Opus 5.5 ▌▌▌▌▌ │ my-project │ v2.1.280 ●
 - **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (`& disown` — le statusline tourne sous bash, contrairement au hook `UserPromptSubmit` decrit plus bas qui doit rester POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-<uid>-fetch-<cksum>`)
 
 **Ligne 3 — Quotas d'utilisation**
-- Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**
-- Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel**
+- Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**. Le segment est **masque** (separateur compris) tant que l'API ne rapporte pas de fenetre 5h en cours : `five_hour: null` (observe depuis le 31/10/2026 sur Max 20x, ou seules les limites hebdo `weekly_all` / `weekly_scoped` restent exposees) ou `resets_at` deja passe — meme regle que Claude Code, qui documente ce champ comme optionnel. Il revient de lui-meme des que l'API rapporte une fenetre
+- Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel** (`seven_day`, sinon l'entree `weekly_all` de `limits[]`)
 - **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable (5 et 5.1) a sa propre limite hebdo, exposee par l'API dans `limits[]` (premiere entree `weekly_scoped` dont `scope.model.display_name` **contient** `fable` — test regex insensible a la casse, pas une egalite stricte, donc valable pour Fable 5.1). Le segment est masque si le compte n'a pas de limite dediee
-- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances)
+- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances). Une reponse est acceptee des qu'elle est un objet JSON portant `five_hour`, `seven_day` ou `limits` (meme a `null`) : exiger un `five_hour` non null figeait les pourcentages sur le dernier cache quand le compte n'a pas de fenetre 5h
 
 ## Calcul des couts
 
@@ -54,7 +54,7 @@ Les messages sont **dedupliques par `requestId`** (`group_by(.reqId) | map(last)
 
 **Web search** : les recherches web cote serveur (`usage.server_tool_use.web_search_requests`) sont facturees $10 / 1 000 requetes quel que soit le modele, en plus des tokens (rattachees a la derniere tentative, celle qui a servi la reponse) ; web fetch est gratuit.
 
-Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API.
+Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API. Sans fenetre rapportee par l'API (ou si la fenetre en cache est deja echue, cas ou tout l'hebdo tomberait dans le bloc 5h), repli sur une fenetre glissante de 5h depuis maintenant ; le cout n'est alors plus affiche puisque le segment 5h est masque.
 
 ### Prix (USD / MTok) — Octobre 2026
 

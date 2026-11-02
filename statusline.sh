@@ -491,32 +491,52 @@ if usage_cache_stale && ! usage_in_backoff; then
     fi
   fi
 
-  # Valider que la reponse contient bien les champs attendus
-  if [ "$API_HTTP" = "200" ] && echo "$API_RESP" | jq -e '.five_hour' > /dev/null 2>&1; then
+  # Valider que la reponse est bien le JSON de /api/oauth/usage : un objet portant au
+  # moins une des cles five_hour / seven_day / limits. Ne PAS exiger un five_hour non
+  # null : depuis le 31/10/2026 l'API renvoie "five_hour": null sur Max 20x quand le
+  # compte n'a pas de fenetre 5h en cours (Claude Code lui-meme documente ce champ
+  # comme optionnel, present seulement tant que l'API le rapporte). L'ancien test
+  # `jq -e '.five_hour'` rejetait alors toute la reponse et figeait les pourcentages
+  # sur le dernier cache (0 % partout).
+  API_OK=0
+  if [ "$API_HTTP" = "200" ] && echo "$API_RESP" | jq -e 'type == "object" and (has("five_hour") or has("seven_day") or has("limits"))' > /dev/null 2>&1; then
+    API_OK=1
     USAGE_DATA=$(echo "$API_RESP" | jq -r '
       [
-        (.five_hour.utilization // 0 | tostring),
+        # Quota 5h : chaine vide si l API ne rapporte pas de fenetre 5h (segment masque)
+        (.five_hour.utilization // "" | tostring),
         (.five_hour.resets_at // "" | tostring),
-        (.seven_day.utilization // 0 | tostring),
-        (.seven_day.resets_at // "" | tostring),
+        # Quota 7j : seven_day, sinon l entree weekly_all du tableau limits
+        (.seven_day.utilization // ([.limits[]? | select(.kind == "weekly_all")] | first | .percent) // 0 | tostring),
+        (.seven_day.resets_at // ([.limits[]? | select(.kind == "weekly_all")] | first | .resets_at) // "" | tostring),
         # Quota 7j dedie a Fable : entree weekly_scoped du tableau limits dont
         # le scope model vise Fable. Chaine vide si absente (segment masque).
         ([.limits[]? | select(.kind == "weekly_scoped" and ((.scope.model.display_name // "") | test("fable"; "i")))] | first | .percent // "" | tostring)
       ] | join("|")
-    ' 2>/dev/null) || USAGE_DATA="0||0||"
+    ' 2>/dev/null) || USAGE_DATA="||0||"
+    # Fenetre 5h deja echue (resets_at passe) : Claude Code la traite comme absente, on
+    # fait pareil (sinon timer a -- et bloc 5h englobant toute la semaine). Un epoch a 0
+    # (date -d indisponible) ne blanchit rien.
+    _R5_ISO=$(echo "$USAGE_DATA" | awk -F'|' '{print $2}')
+    if [ -n "$_R5_ISO" ]; then
+      _R5_EPOCH=$(date -d "$_R5_ISO" +%s 2>/dev/null || echo 0)
+      if [ "$_R5_EPOCH" -gt 0 ] && [ "$_R5_EPOCH" -le "$(date +%s)" ]; then
+        USAGE_DATA=$(echo "$USAGE_DATA" | awk -F'|' '{OFS="|"; $1=""; $2=""; print}')
+      fi
+    fi
     # Persister dans le fichier durable (survit aux purges /tmp et reboots)
     echo "$USAGE_DATA" > "$USAGE_SESSION_FILE" 2>/dev/null || true
   else
     # API echouee : chaine de fallback
     # 1) Cache /tmp precedent
     # 2) Fichier durable ~/.claude/usage-session
-    # 3) Zeros (premier lancement uniquement)
+    # 3) Vide / zeros (premier lancement uniquement)
     if [ -n "$PREV_USAGE" ]; then
-      USAGE_DATA=$(echo "$PREV_USAGE" | awk -F'|' '{OFS="|"; print $1,$2,$3,$4,$5}') || USAGE_DATA="0||0||"
+      USAGE_DATA=$(echo "$PREV_USAGE" | awk -F'|' '{OFS="|"; print $1,$2,$3,$4,$5}') || USAGE_DATA="||0||"
     elif [ -f "$USAGE_SESSION_FILE" ]; then
-      USAGE_DATA=$(cat "$USAGE_SESSION_FILE" 2>/dev/null) || USAGE_DATA="0||0||"
+      USAGE_DATA=$(cat "$USAGE_SESSION_FILE" 2>/dev/null) || USAGE_DATA="||0||"
     else
-      USAGE_DATA="0||0||"
+      USAGE_DATA="||0||"
     fi
   fi
 
@@ -526,10 +546,11 @@ if usage_cache_stale && ! usage_in_backoff; then
   RESET_5H_RAW=""
   WEEK_START=""
 
-  # Extraire resets_at de l'API si disponible, sinon du cache
-  if [ "$API_HTTP" = "200" ] && [ -n "$API_RESP" ]; then
-    RESET_7D_RAW=$(echo "$API_RESP" | jq -r '.seven_day.resets_at // ""' 2>/dev/null)
-    RESET_5H_RAW=$(echo "$API_RESP" | jq -r '.five_hour.resets_at // ""' 2>/dev/null)
+  # Extraire resets_at de l'API si disponible (champs 2 et 4 de USAGE_DATA, deja
+  # normalises : fenetre 5h echue blanchie, repli weekly_all pour le 7j), sinon du cache
+  if [ "$API_OK" = "1" ]; then
+    RESET_5H_RAW=$(echo "$USAGE_DATA" | awk -F'|' '{print $2}')
+    RESET_7D_RAW=$(echo "$USAGE_DATA" | awk -F'|' '{print $4}')
   fi
 
   # Fallback : utiliser le fichier week-session existant
@@ -537,12 +558,21 @@ if usage_cache_stale && ! usage_in_backoff; then
     IFS='|' read -r RESET_7D_RAW WEEK_START < "$WEEK_SESSION_FILE" 2>/dev/null || true
   fi
 
-  # Fallback 5h : cache precedent → fichier durable → approximation
-  if [ -z "$RESET_5H_RAW" ] && [ -n "$PREV_USAGE" ]; then
+  # Fallback 5h (API en echec seulement) : cache precedent → fichier durable → approximation.
+  # Quand l'API a repondu sans fenetre 5h, on ne repeche PAS une vieille fenetre en cache.
+  if [ "$API_OK" != "1" ] && [ -z "$RESET_5H_RAW" ] && [ -n "$PREV_USAGE" ]; then
     RESET_5H_RAW=$(echo "$PREV_USAGE" | awk -F'|' '{print $2}')
   fi
-  if [ -z "$RESET_5H_RAW" ] && [ -f "$USAGE_SESSION_FILE" ]; then
+  if [ "$API_OK" != "1" ] && [ -z "$RESET_5H_RAW" ] && [ -f "$USAGE_SESSION_FILE" ]; then
     RESET_5H_RAW=$(awk -F'|' '{print $2}' "$USAGE_SESSION_FILE" 2>/dev/null)
+  fi
+  # Une fenetre 5h en cache deja echue n'est plus une fenetre : la garder attribuerait
+  # toute la semaine au bloc 5h (cout 5h == cout 7j). Repli sur la fenetre glissante.
+  if [ -n "$RESET_5H_RAW" ]; then
+    _R5_EPOCH=$(date -d "$RESET_5H_RAW" +%s 2>/dev/null || echo 0)
+    if [ "$_R5_EPOCH" -gt 0 ] && [ "$_R5_EPOCH" -le "$(date +%s)" ]; then
+      RESET_5H_RAW=""
+    fi
   fi
 
   if [ -n "$RESET_7D_RAW" ]; then
@@ -760,14 +790,18 @@ if usage_cache_stale && ! usage_in_backoff; then
   # Toujours ecrire les 7 champs dans le cache
   echo "$USAGE_DATA" > "$USAGE_CACHE" 2>/dev/null || true
 else
-  USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="0||0|||0|0"
+  USAGE_DATA=$(cat "$USAGE_CACHE" 2>/dev/null) || USAGE_DATA="||0|||0|0"
 fi
 
 # Parsing du cache (garantir 7 champs meme si cache ancien/incomplet)
 IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO PCT_FABLE WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
 WEEK_COST="${WEEK_COST:-0}"
 BLOCK_COST="${BLOCK_COST:-0}"
-PCT_5H_INT=$(printf '%.0f' "${PCT_5H:-0}" 2>/dev/null) || PCT_5H_INT=0
+# Quota 5h : vide si l'API ne rapporte pas de fenetre 5h en cours (segment masque, comme Fable)
+PCT_5H_INT=""
+if [ -n "${PCT_5H:-}" ]; then
+  PCT_5H_INT=$(printf '%.0f' "$PCT_5H" 2>/dev/null) || PCT_5H_INT=""
+fi
 PCT_7D_INT=$(printf '%.0f' "${PCT_7D:-0}" 2>/dev/null) || PCT_7D_INT=0
 # Quota Fable : vide si le compte est sans limite dediee (segment masque)
 PCT_FABLE_INT=""
@@ -796,7 +830,7 @@ usage_color() {
   else printf '%b' "$BGREEN"; fi
 }
 
-COLOR_5H=$(usage_color "$PCT_5H_INT")
+COLOR_5H=$(usage_color "${PCT_5H_INT:-0}")
 COLOR_7D=$(usage_color "$PCT_7D_INT")
 
 # --- Timer 5h ---
@@ -838,14 +872,18 @@ else
 fi
 
 # Assemblage ligne 3
-BAR_5H=$(mini_bar "$PCT_5H_INT" "$COLOR_5H")
+BAR_5H=$(mini_bar "${PCT_5H_INT:-0}" "$COLOR_5H")
 BAR_7D=$(mini_bar "$PCT_7D_INT" "$COLOR_7D")
 
 # --- Couts formates ---
 WEEK_COST_FMT=$(printf '$%.2f' "${WEEK_COST:-0}" 2>/dev/null) || WEEK_COST_FMT='$0.00'
 BLOCK_COST_FMT=$(printf '$%.2f' "${BLOCK_COST:-0}" 2>/dev/null) || BLOCK_COST_FMT='$0.00'
 
-BLOCK_SEG="$(printf '%b' "${WHITE}")5h$(printf '%b' "${RST}") ${BAR_5H} $(printf '%b' "${COLOR_5H}${BOLD}")${PCT_5H_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_5H}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${BLOCK_COST_FMT}$(printf '%b' "${RST}")"
+# --- Segment 5h : masque (separateur compris) tant que l'API ne rapporte pas de fenetre 5h ---
+BLOCK_SEG=""
+if [ -n "$PCT_5H_INT" ]; then
+  BLOCK_SEG="$(printf '%b' "${WHITE}")5h$(printf '%b' "${RST}") ${BAR_5H} $(printf '%b' "${COLOR_5H}${BOLD}")${PCT_5H_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_5H}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${BLOCK_COST_FMT}$(printf '%b' "${RST}")$(printf '%b' "${SEP}")"
+fi
 WEEK_SEG="$(printf '%b' "${WHITE}")7j$(printf '%b' "${RST}") ${BAR_7D} $(printf '%b' "${COLOR_7D}${BOLD}")${PCT_7D_INT}%$(printf '%b' "${RST}") $(printf '%b' "${DIM}${CYAN}")${TIMER_7D}$(printf '%b' "${RST}") $(printf '%b' "${BYELLOW}")${WEEK_COST_FMT}$(printf '%b' "${RST}")"
 
 # --- Segment Fable 7j : juste le pourcentage (limite hebdo dediee au modele) ---
@@ -855,7 +893,7 @@ if [ -n "$PCT_FABLE_INT" ]; then
   FABLE_SEG="$(printf '%b' "${SEP}${GOLD}")Fable$(printf '%b' "${RST}") $(printf '%b' "${COLOR_FABLE}${BOLD}")${PCT_FABLE_INT}%$(printf '%b' "${RST}")"
 fi
 
-LINE3="${BLOCK_SEG}$(printf '%b' "${SEP}")${WEEK_SEG}${FABLE_SEG}"
+LINE3="${BLOCK_SEG}${WEEK_SEG}${FABLE_SEG}"
 
 # ============================================================================
 # SORTIE
