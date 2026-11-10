@@ -134,7 +134,7 @@ Un installer cross-platform detecte l'OS et fait tout le necessaire :
 npx github:jeremywtp/statusline-claude-code
 ```
 
-Prerequis : Node 18+. L'installer :
+Prerequis : Node 18+. Avec npm 12 ou plus recent, la commande devient `npx --allow-git=root github:jeremywtp/statusline-claude-code` (voir la note npm 12 sous [Commandes disponibles](#commandes-disponibles)). L'installer :
 
 - copie `statusline.sh` vers `~/.claude/statusline.sh` (avec backup `.bak` horodate si un script existant est present)
 - merge proprement la cle `statusLine` dans `~/.claude/settings.json` sans casser les autres cles (`env`, `permissions`, `enabledPlugins`, etc.)
@@ -190,6 +190,8 @@ npx github:jeremywtp/statusline-claude-code uninstall
 ```
 
 > **npx en cache ou npm 10.8** : pour forcer une version precise, ajouter `#<commit>` (`npx github:jeremywtp/statusline-claude-code#<sha>`). Si npx echoue avec `GitFetcher requires an Arborist constructor to pack a tarball` (bug de npm 10.8, vu sous Ubuntu avec node 20), passer par l'archive GitHub, qui ne demande pas git : `npx https://codeload.github.com/jeremywtp/statusline-claude-code/tar.gz/main` (ou `/tar.gz/<sha>`), suivi de la commande voulue (`install`, `doctor`...).
+>
+> **npm 12** (verifie sur npm 12.2.1) : npx refuse par defaut les paquets git et les archives distantes — `EALLOWGIT` (`Fetching packages of type "git" have been disabled`) pour `github:...`, `EALLOWREMOTE` pour l'archive codeload. Trois issues, au choix : `npx --allow-git=root github:jeremywtp/statusline-claude-code` (l'option se place avant le nom du paquet, et se combine avec `#<sha>`), `npx --allow-remote=root https://codeload.github.com/jeremywtp/statusline-claude-code/tar.gz/main`, ou l'installeur lance depuis un clone du depot, sans npx : `node bin/install.mjs` (memes commandes et options).
 
 ### Installation manuelle (fallback)
 
