@@ -671,10 +671,12 @@ if usage_cache_stale && ! usage_in_backoff; then
           if (.model // "" | test("fable-5-2|mythos-5-2")) then
             # Fable 5.2 / Mythos 5.2 (sortis le 09/11/2026, cible de l alias fable de Claude Code) :
             # standard $8/$40 (20 % sous Fable 5.1), caches write $10 / $16, cache read x0.025
-            # ($0.20). Premier Fable a fast mode : $16/$80 (x2), caches $20 / $32 / $0.40 (table
-            # Jk du binaire Claude Code 2.1.322). Ecart mesure contre cost.total_cost_usd sur une
-            # session reelle standard (4 requetes, $0.8031958) : 0 %. Doit rester AVANT fable|mythos,
-            # qui le facturerait au tarif Fable 5 ($10/$50, cache read $1).
+            # ($0.20). Premier Fable a fast mode : $16/$80 (x2), caches $20 / $32 / $0.40 (page de
+            # prix et tarifs fast en dur dans le binaire Claude Code 2.1.322 ; non mesure en session
+            # reelle, le fast mode se payant en credits d usage). Ecart mesure contre
+            # cost.total_cost_usd sur une session reelle standard (4 requetes, $0.8031958) : 0 %.
+            # Doit rester AVANT fable|mythos, qui le facturerait au tarif Fable 5 ($10/$50, cache
+            # read $1).
             if .speed == "fast" then
               ($in*16 + $out*80 + $c5*20 + $c1*32 + $cr*0.4) / 1000000
             else
@@ -717,10 +719,12 @@ if usage_cache_stale && ! usage_in_backoff; then
             else
               ($in*5 + $out*25 + $c5*6.25 + $c1*10 + $cr*0.5) / 1000000
             end
-          elif (.model // "" | test("opus-4-1[-@]|opus-4[-@]2025")) then
+          elif (.model // "" | test("opus-4-[01]($|[-@])|opus-4($|[-@]2025)")) then
             # Opus 4 (claude-opus-4-20250514) et Opus 4.1 (claude-opus-4-1-20250805) : tarif legacy
             # $15/$75. Retires le 15/06 et le 05/08/2026, conserves pour les messages historiques.
-            # Le separateur @ couvre les IDs Google Cloud (claude-opus-4-1@20250805).
+            # Le separateur @ couvre les IDs Google Cloud (claude-opus-4-1@20250805), la fin de
+            # chaine les alias sans date du catalogue Claude Code (claude-opus-4, claude-opus-4-0,
+            # claude-opus-4-1), qui tombaient sinon dans la branche opus generique a $5/$25.
             ($in*15 + $out*75 + $c5*18.75 + $c1*30 + $cr*1.5) / 1000000
           elif (.model // "" | test("opus")) then
             # Tout autre Opus (futur opus-4-9, opus-6...) : hypothese au tarif Opus 4.5 a 5 ($5/$25,
@@ -754,11 +758,11 @@ if usage_cache_stale && ! usage_in_backoff; then
           elif (.model // "" | test("sonnet-5-5")) then
             # Sonnet 5.5 (sorti le 28/09/2026, alias sonnet de Claude Code) : $2/$10 et caches write
             # $2.50 / $4 comme Sonnet 5, mais cache read a x0.05 ($0.10) au lieu de x0.1 ($0.20).
-            # Tarif releve le 10/11/2026 (page de prix et catalogue Claude Code, palier
-            # tier_2_10_cache_read_0_10) : au lancement le read etait a $0.20. Ecart mesure contre
-            # cost.total_cost_usd sur une session reelle (4 requetes, $0.1546946) : 0 %, contre
-            # +8,6 % au tarif Sonnet 5. Pas de fast mode. Doit rester AVANT sonnet-5, qui le
-            # capturerait.
+            # Baisse annoncee par Anthropic le 07/10/2026 (notes de version de la plateforme : read
+            # de $0.20 a $0.10), integree ici le 10/11/2026 (palier tier_2_10_cache_read_0_10 du
+            # catalogue Claude Code). Ecart mesure contre cost.total_cost_usd sur une session reelle
+            # (4 requetes, $0.1546946) : 0 %, contre +8,6 % au tarif Sonnet 5. Pas de fast mode.
+            # Doit rester AVANT sonnet-5, qui le capturerait.
             ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.1) / 1000000
           elif (.model // "" | test("sonnet-5")) then
             # Sonnet 5 (et tout futur sonnet-5-x non reconnu) : $2/$10. Le tarif de lancement
