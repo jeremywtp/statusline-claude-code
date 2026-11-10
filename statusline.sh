@@ -38,7 +38,7 @@ BYELLOW='\033[38;5;227m'
 BCYAN='\033[38;5;51m'
 ORANGE='\033[38;5;208m'
 UMAGENTA='\033[38;5;201m'  # magenta vif — reserve a ultracode (effort "ultra")
-GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable / Mythos (5 et 5.1, tier flagship au-dessus d'Opus)
+GOLD='\033[38;5;214m'      # or/ambre — reserve a Fable / Mythos (5, 5.1 et 5.2, tier flagship au-dessus d'Opus)
 
 # --- Separateur fin │ ---
 SEP="${DIM}${GRAY} \xe2\x94\x82 ${RST}"
@@ -186,8 +186,9 @@ LINE1="$(printf '%b' "${BOLD}${MC}")${MODEL_NAME}$(printf '%b' "${RST}")"
 
 # Indicateurs Fast mode + Effort level
 # Fast mode — source canonique : .fast_mode du JSON stdin, valeur LIVE de la session
-# (false sur un modele sans fast mode meme si /fast est memorise : seuls Opus 5.5,
-# Opus 5 et Opus 4.8 l'ont). Fallback settings.json si Claude Code est trop ancien
+# (false sur un modele sans fast mode meme si /fast est memorise : seuls Fable 5.2 /
+# Mythos 5.2, Opus 5.5, Opus 5 et Opus 4.8 l'ont ; sur Fable 5.2 il ne s'active que par
+# un /fast lance sur ce modele). Fallback settings.json si Claude Code est trop ancien
 # pour exposer ce champ.
 if [ -n "$FAST_STDIN" ]; then
   FAST_MODE="$FAST_STDIN"
@@ -233,8 +234,8 @@ if [ "$FAST_MODE" = "true" ]; then
 fi
 
 # Barres verticales style signal pour l'effort level
-# Haiku 4.5 et anterieurs : aucune barre (pas de niveau d'effort) | Fable / Mythos (5 et 5.1)
-# + Opus (toutes versions) + Sonnet 5 / 5.5 + Haiku 5.5 : echelle 5 niveaux (xhigh dispo des
+# Haiku 4.5 et anterieurs : aucune barre (pas de niveau d'effort) | Fable / Mythos (5, 5.1 et
+# 5.2) + Opus (toutes versions) + Sonnet 5 / 5.5 + Haiku 5.5 : echelle 5 niveaux (xhigh dispo des
 # Opus 4.7, sur Fable / Mythos, sur Sonnet 5 / 5.5 et sur Haiku 5.5) | Sonnet 4.6 & autres :
 # 4 niveaux. On matche tous les Opus plutot qu'une version precise : future-proof (4.8, 4.9...)
 # et sans piege de comparaison de version (4.10 < 4.7 en flottant). Les Opus < 4.7 n'emettent
@@ -642,14 +643,15 @@ if usage_cache_stale && ! usage_in_backoff; then
                  cache_read: (.cache_read_input_tokens // 0)} ]
             end)}' {} + > "$WEEK_TMP" 2>/dev/null || true
 
-    # Prix officiels Anthropic (USD / MTok) — verifies le 07/10/2026 sur
-    # platform.claude.com/docs/en/about-claude/pricing (Fable 5.1, Fable 5, Opus 5.5, Opus 5,
-    # Opus 4.8, Sonnet 5.5, Sonnet 5, Haiku 5.5 inclus). Regle des caches : write 5 min = x1.25
-    # input, write 1h = x2 input, read = x0.1 input, sauf Fable 5.1 / Mythos 5.1 (read x0.025) et
-    # Opus 5.5 (read x0.05). En fast mode, les memes multiplicateurs de cache s'appliquent au tarif
-    # input fast. Haiku 5.5 est le seul modele a tarif par palier de longueur de prompt (tout x5
-    # au-dela de 100K tokens de prompt, output compris) : le palier est evalue par tentative,
-    # exactement comme le fait Claude Code pour cost.total_cost_usd.
+    # Prix officiels Anthropic (USD / MTok) — verifies le 10/11/2026 sur
+    # platform.claude.com/docs/en/about-claude/pricing (Fable 5.2, Fable 5.1, Fable 5, Opus 5.5,
+    # Opus 5, Opus 4.8, Sonnet 5.5, Sonnet 5, Haiku 5.5 inclus) et recoupes avec le catalogue
+    # embarque dans Claude Code 2.1.322 (pricing_tiers). Regle des caches : write 5 min = x1.25
+    # input, write 1h = x2 input, read = x0.1 input, sauf Fable 5.2 / 5.1 et Mythos 5.2 / 5.1
+    # (read x0.025) et Opus 5.5 / Sonnet 5.5 (read x0.05). En fast mode, les memes multiplicateurs
+    # de cache s'appliquent au tarif input fast. Haiku 5.5 est le seul modele a tarif par palier de
+    # longueur de prompt (tout x5 au-dela de 100K tokens de prompt, output compris) : le palier est
+    # evalue par tentative, exactement comme le fait Claude Code pour cost.total_cost_usd.
     # Source UNIQUE partagee par les couts 7j et 5h : les deux jq plus bas l'injectent telle
     # quelle (chaine shell simple quote : pas d'apostrophe dans les commentaires jq).
     # Etape 1 : dedup par requete (le streaming ecrit plusieurs lignes JSONL par requete, seule
@@ -666,13 +668,27 @@ if usage_cache_stale && ! usage_in_backoff; then
           .cache_read as $cr | (.web_search // 0) as $ws |
           # Web search cote serveur : $10 / 1000 requetes quel que soit le modele (web fetch gratuit).
           ($ws * 0.01) +
-          if (.model // "" | test("fable-5-1|mythos-5-1")) then
+          if (.model // "" | test("fable-5-2|mythos-5-2")) then
+            # Fable 5.2 / Mythos 5.2 (sortis le 09/11/2026, cible de l alias fable de Claude Code) :
+            # standard $8/$40 (20 % sous Fable 5.1), caches write $10 / $16, cache read x0.025
+            # ($0.20). Premier Fable a fast mode : $16/$80 (x2), caches $20 / $32 / $0.40 (table
+            # Jk du binaire Claude Code 2.1.322). Ecart mesure contre cost.total_cost_usd sur une
+            # session reelle standard (4 requetes, $0.8031958) : 0 %. Doit rester AVANT fable|mythos,
+            # qui le facturerait au tarif Fable 5 ($10/$50, cache read $1).
+            if .speed == "fast" then
+              ($in*16 + $out*80 + $c5*20 + $c1*32 + $cr*0.4) / 1000000
+            else
+              ($in*8 + $out*40 + $c5*10 + $c1*16 + $cr*0.2) / 1000000
+            end
+          elif (.model // "" | test("fable-5-1|mythos-5-1")) then
             # Fable 5.1 / Mythos 5.1 (sortis le 01/09/2026) : memes $10/$50 et caches write que
-            # Fable 5, mais cache read a $0.25 (x0.025 : seule exception au x0.1). Pas de fast mode.
+            # Fable 5, mais cache read a $0.25 (x0.025, taux reconduit sur Fable 5.2). Pas de fast mode.
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*0.25) / 1000000
           elif (.model // "" | test("fable|mythos")) then
-            # Fable 5 / Mythos 5 : tier flagship, tarif unique $10/$50 (pas de fast mode).
-            # Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le tarif input.
+            # Fable 5 / Mythos 5 (et tout autre Fable / Mythos non reconnu) : tarif unique $10/$50
+            # (pas de fast mode). Caches = multiplicateurs officiels (x1.25 / x2 / x0.1) sur le
+            # tarif input. Un futur Fable est a revalider a chaque sortie (5.1 puis 5.2 ont change
+            # le cache read, 5.2 le tarif de base et le fast mode).
             ($in*10 + $out*50 + $c5*12.5 + $c1*20 + $cr*1) / 1000000
           elif (.model // "" | test("opus-5-5")) then
             # Opus 5.5 (sorti le 22/09/2026) : standard $4/$20, fast $8/$40 (x2). Caches write aux
@@ -735,12 +751,19 @@ if usage_cache_stale && ! usage_in_backoff; then
             # Haiku 4.5 (et tout autre Haiku non reconnu) : $1/$5. Haiku 3.5 ($0.80/$4) et Haiku 3 sont
             # retires depuis fevrier / avril 2026. Haiku 5.5 est capture juste au-dessus.
             ($in*1 + $out*5 + $c5*1.25 + $c1*2 + $cr*0.1) / 1000000
+          elif (.model // "" | test("sonnet-5-5")) then
+            # Sonnet 5.5 (sorti le 28/09/2026, alias sonnet de Claude Code) : $2/$10 et caches write
+            # $2.50 / $4 comme Sonnet 5, mais cache read a x0.05 ($0.10) au lieu de x0.1 ($0.20).
+            # Tarif releve le 10/11/2026 (page de prix et catalogue Claude Code, palier
+            # tier_2_10_cache_read_0_10) : au lancement le read etait a $0.20. Ecart mesure contre
+            # cost.total_cost_usd sur une session reelle (4 requetes, $0.1546946) : 0 %, contre
+            # +8,6 % au tarif Sonnet 5. Pas de fast mode. Doit rester AVANT sonnet-5, qui le
+            # capturerait.
+            ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.1) / 1000000
           elif (.model // "" | test("sonnet-5")) then
-            # Sonnet 5 et Sonnet 5.5 (sorti le 28/09/2026, meme tarif) : $2/$10. La regex capture
-            # aussi claude-sonnet-5-5 : pas de branche dediee tant que les deux tarifs sont egaux
-            # (ecart mesure contre cost.total_cost_usd de Claude Code sur Sonnet 5.5 : 0 %).
-            # Le tarif de lancement de Sonnet 5 (annonce jusqu au 31/08/2026) est devenu le tarif
-            # standard, la hausse a $3/$15 prevue le 01/09/2026 est annulee.
+            # Sonnet 5 (et tout futur sonnet-5-x non reconnu) : $2/$10. Le tarif de lancement
+            # (annonce jusqu au 31/08/2026) est devenu le tarif standard, la hausse a $3/$15 prevue
+            # le 01/09/2026 est annulee. Sonnet 5.5 est capture juste au-dessus.
             # Pas de fast mode. Caches = multiplicateurs officiels (x1.25 / x2 / x0.1).
             ($in*2 + $out*10 + $c5*2.5 + $c1*4 + $cr*0.2) / 1000000
           else

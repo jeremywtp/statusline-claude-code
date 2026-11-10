@@ -13,11 +13,11 @@ Opus 5.5 ▌▌▌▌▌ │ my-project │ v2.1.280 ●
 ## Fonctionnalites
 
 **Ligne 1 — Identite & Statut**
-- Nom du modele avec couleur (Fable / Mythos 5 et 5.1 = or/ambre, Opus = magenta, Sonnet = bleu, Haiku = cyan)
+- Nom du modele avec couleur (Fable / Mythos 5, 5.1 et 5.2 = or/ambre, Opus = magenta, Sonnet = bleu, Haiku = cyan)
 - Indicateur **⚡** (jaune) si le fast mode est actif (champ `.fast_mode` du JSON stdin, repli `fastMode` de `settings.json`)
 - Indicateur **effort level** en barres verticales (lu en direct depuis le champ `.effort.level` du JSON stdin, fallback `<local-command-stdout>` du JSONL), adapte au modele. Toutes les graduations sont des `▌` : celles atteintes prennent la couleur du niveau, les suivantes restent grises (`DIM`)
   - **Sonnet 4.6 & autres** (4 graduations) : low (1, cyan) → medium (2, jaune) → high (3, rouge) → max (4, magenta). `xhigh` retombe sur high ; **ultracode** affiche 4 graduations + `✦`
-  - **Fable / Mythos (5 et 5.1), Opus, Sonnet 5 / 5.5 & Haiku 5.5** (5 graduations) : insere xhigh (4, orange) entre high et max (xhigh existe a partir d'Opus 4.7, sur Fable / Mythos, sur Sonnet 5 / 5.5 et sur Haiku 5.5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
+  - **Fable / Mythos (5, 5.1 et 5.2), Opus, Sonnet 5 / 5.5 & Haiku 5.5** (5 graduations) : insere xhigh (4, orange) entre high et max (xhigh existe a partir d'Opus 4.7, sur Fable / Mythos, sur Sonnet 5 / 5.5 et sur Haiku 5.5) ; le mode **ultracode** s'affiche `▌▌▌▌▌ ✦` en magenta vif
   - **Haiku 4.5 et anterieurs** : pas d'indicateur (ces modeles n'ont pas de niveau d'effort). **Haiku 5.5** est le premier Haiku a effort (low → max, xhigh compris, defaut `medium`) et suit l'echelle 5 graduations ci-dessus
   - Niveau absent, `default` ou inconnu → rendu comme `medium`
 - Nom du sub-agent (si applicable)
@@ -41,7 +41,7 @@ Opus 5.5 ▌▌▌▌▌ │ my-project │ v2.1.280 ●
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**. Le segment est **masque** (separateur compris) tant que l'API ne rapporte pas de fenetre 5h en cours : `five_hour: null` (observe depuis le 31/10/2026 sur Max 20x, ou seules les limites hebdo `weekly_all` / `weekly_scoped` restent exposees) ou `resets_at` deja passe — meme regle que Claude Code, qui documente ce champ comme optionnel. Il revient de lui-meme des que l'API rapporte une fenetre
 - Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel** (`seven_day`, sinon l'entree `weekly_all` de `limits[]`)
-- **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable (5 et 5.1) a sa propre limite hebdo, exposee par l'API dans `limits[]` (premiere entree `weekly_scoped` dont `scope.model.display_name` **contient** `fable` — test regex insensible a la casse, pas une egalite stricte, donc valable pour Fable 5.1). Le segment est masque si le compte n'a pas de limite dediee
+- **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable (5, 5.1 et 5.2) a sa propre limite hebdo, exposee par l'API dans `limits[]` (premiere entree `weekly_scoped` dont `scope.model.display_name` **contient** `fable` — test regex insensible a la casse, pas une egalite stricte, donc valable quelle que soit la version : verifie en session Fable 5.2 le 10/11/2026). Le segment est masque si le compte n'a pas de limite dediee
 - Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances). Une reponse est acceptee des qu'elle est un objet JSON portant `five_hour`, `seven_day` ou `limits` (meme a `null`) : exiger un `five_hour` non null figeait les pourcentages sur le dernier cache quand le compte n'a pas de fenetre 5h
 
 ## Calcul des couts
@@ -50,17 +50,19 @@ Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de 
 
 Les messages sont **dedupliques par `requestId`** (`group_by(.reqId) | map(last)`) : le streaming ecrit plusieurs lignes JSONL pour une meme requete, seule la derniere porte les compteurs de tokens definitifs.
 
-**Fallback cote serveur** : quand Fable (5 / 5.1), Opus 5.5, Opus 5 ou Sonnet 5.5 refuse une requete et qu'elle est rejouee sur un modele de repli (table de Claude Code v2.1.284 — Fable et Opus 5.5 : bio → Opus 5, cyber → Opus 4.8, frontier_llm → Opus 5 ; Opus 5 : cyber → Opus 4.8 seulement ; Sonnet 5.5 : cyber et frontier_llm → Sonnet 5 ; les autres categories n'ont pas de repli, et Haiku 5.5 n'a aucun repli), le JSONL porte un tableau `usage.iterations` avec une entree par tentative et son propre `model`. C'est le registre officiel de facturation : chaque tentative ayant produit de l'output est facturee **au tarif de son modele et a sa vitesse** (la partie deja streamee par le modele qui refuse a son propre tarif, la suite au tarif du modele de repli ; le `speed` d'une entree prime sur celui de la requete, un repli pouvant le surcharger) ; une tentative refusee avant le premier token n'est pas facturee. Le script deduplique d'abord par `requestId` (derniere ligne JSONL = compteurs definitifs), puis deplie une tentative facturable par entree de `iterations` au lieu de se fier au `model` de premier niveau, qui ne designe que le modele ayant servi la reponse. Un refus sec (`stop_reason: refusal` sans output, hors fallback) n'est pas facture non plus : sa liste de tentatives est vide, ce qui neutralise aussi les lignes de streaming intermediaires de la requete.
+**Fallback cote serveur** : quand Fable (5 / 5.1 / 5.2), Opus 5.5, Opus 5 ou Sonnet 5.5 refuse une requete et qu'elle est rejouee sur un modele de repli (table de Claude Code v2.1.322, inchangee depuis la v2.1.284 — Fable et Opus 5.5 : bio → Opus 5, cyber → Opus 4.8, frontier_llm → Opus 5 ; Opus 5 : cyber → Opus 4.8 seulement ; Sonnet 5.5 : cyber et frontier_llm → Sonnet 5 ; les autres categories n'ont pas de repli, et Haiku 5.5 comme Mythos 5.1 / 5.2 n'ont aucun repli), le JSONL porte un tableau `usage.iterations` avec une entree par tentative et son propre `model`. C'est le registre officiel de facturation : chaque tentative ayant produit de l'output est facturee **au tarif de son modele et a sa vitesse** (la partie deja streamee par le modele qui refuse a son propre tarif, la suite au tarif du modele de repli ; le `speed` d'une entree prime sur celui de la requete, un repli pouvant le surcharger) ; une tentative refusee avant le premier token n'est pas facturee. Le script deduplique d'abord par `requestId` (derniere ligne JSONL = compteurs definitifs), puis deplie une tentative facturable par entree de `iterations` au lieu de se fier au `model` de premier niveau, qui ne designe que le modele ayant servi la reponse. Un refus sec (`stop_reason: refusal` sans output, hors fallback) n'est pas facture non plus : sa liste de tentatives est vide, ce qui neutralise aussi les lignes de streaming intermediaires de la requete.
 
 **Web search** : les recherches web cote serveur (`usage.server_tool_use.web_search_requests`) sont facturees $10 / 1 000 requetes quel que soit le modele, en plus des tokens (rattachees a la derniere tentative, celle qui a servi la reponse) ; web fetch est gratuit.
 
 Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utilisant la fenetre `resets_at - 5h` de l'API. Sans fenetre rapportee par l'API (ou si la fenetre en cache est deja echue, cas ou tout l'hebdo tomberait dans le bloc 5h), repli sur une fenetre glissante de 5h depuis maintenant ; le cout n'est alors plus affiche puisque le segment 5h est masque.
 
-### Prix (USD / MTok) — Octobre 2026
+### Prix (USD / MTok) — Novembre 2026
 
 | Modele | Input | Output | Cache 5min write | Cache 1h write | Cache read |
 |---|---|---|---|---|---|
-| **Fable 5.1 / Mythos 5.1** (flagship, sorti le 01/09/26) | $10 | $50 | $12.50 | $20 | **$0.25** |
+| **Fable 5.2 / Mythos 5.2** (flagship, sorti le 09/11/26) | $8 | $40 | $10 | $16 | **$0.20** |
+| **Fable 5.2 / Mythos 5.2 Fast** (`speed: fast`) | $16 | $80 | $20 | $32 | **$0.40** |
+| **Fable 5.1 / Mythos 5.1** (sorti le 01/09/26) | $10 | $50 | $12.50 | $20 | **$0.25** |
 | **Fable 5 / Mythos 5** | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 5.5** (sorti le 22/09/26) | $4 | $20 | $5 | $8 | **$0.20** |
 | **Opus 5.5 Fast** (`speed: fast`) | $8 | $40 | $10 | $16 | **$0.40** |
@@ -68,7 +70,7 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 | **Opus 5 / Opus 4.8 Fast** (`speed: fast`) | $10 | $50 | $12.50 | $20 | $1 |
 | **Opus 4.5 / 4.6 / 4.7** | $5 | $25 | $6.25 | $10 | $0.50 |
 | **Opus 4.6 / 4.7 Fast** (historique, retire) | $30 | $150 | $37.50 | $60 | $3 |
-| **Sonnet 5.5** (sorti le 28/09/26) | $2 | $10 | $2.50 | $4 | $0.20 |
+| **Sonnet 5.5** (sorti le 28/09/26) | $2 | $10 | $2.50 | $4 | **$0.10** |
 | **Sonnet 5** | $2 | $10 | $2.50 | $4 | $0.20 |
 | **Sonnet 4.6 / 4.5** (et fallback general) | $3 | $15 | $3.75 | $6 | $0.30 |
 | **Haiku 5.5** (sorti le 07/10/2026) — prompt <= 100K tokens | $0.10 | $0.50 | $0.125 | $0.20 | $0.01 |
@@ -76,12 +78,13 @@ Le cout 5h est filtre depuis les memes donnees JSONL que le cout hebdo, en utili
 | **Haiku 4.5** | $1 | $5 | $1.25 | $2 | $0.10 |
 | Opus legacy (4 / 4.1, retires) | $15 | $75 | $18.75 | $30 | $1.50 |
 
-Regle generale des caches : write 5 min = x1.25 du prix input, write 1h = x2, read = x0.1 — **sauf Fable 5.1 / Mythos 5.1 ou le read vaut x0.025** ($0.25 au lieu de $1) **et Opus 5.5 ou il vaut x0.05** ($0.20). En fast mode, ces multiplicateurs s'appliquent au tarif input fast ; sur Haiku 5.5, au tarif input du palier en vigueur ($0.10 ou $0.50). Verifie le 07/10/2026 sur [platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Regle generale des caches : write 5 min = x1.25 du prix input, write 1h = x2, read = x0.1 — **sauf Fable 5.2 / 5.1 et Mythos 5.2 / 5.1 ou le read vaut x0.025** ($0.20 sur 5.2, $0.25 sur 5.1) **et Opus 5.5 / Sonnet 5.5 ou il vaut x0.05** ($0.20 et $0.10). En fast mode, ces multiplicateurs s'appliquent au tarif input fast ; sur Haiku 5.5, au tarif input du palier en vigueur ($0.10 ou $0.50). Verifie le 10/11/2026 sur [platform.claude.com/docs/en/about-claude/pricing](https://platform.claude.com/docs/en/about-claude/pricing) et recoupe avec le catalogue de prix embarque dans Claude Code v2.1.322 (`pricing_tiers`).
 
-> **Fable 5.1** — et **Mythos 5.1** (Project Glasswing, meme tier et meme tarif) — sorti le 01/09/2026 : memes $10/$50 et caches write que Fable 5, mais cache read 4x moins cher ($0.25). Sans fast mode. Fable 5 / Mythos 5 restent servis au tarif precedent (cache read $1).
+> **Fable 5.2** — et **Mythos 5.2** (acces restreint, meme tier et meme tarif) — sorti le 09/11/2026 (connu de Claude Code depuis la v2.1.321 du 09/11/2026, ou il devient la cible de l'alias `fable` ; les choix Fable 5.1 memorises y basculent d'eux-memes sur les plans Pro et Max) : $8/$40 (20 % sous Fable 5.1), caches write $10 / $16, cache read x0.025 ($0.20), batch $4/$20. **Premier Fable a fast mode** : $16/$80 (x2), caches $20 / $32 / $0.40 ; il demande Claude Code v2.1.321+, ne s'active que par un `/fast` lance sur Fable 5.2 et se paie en credits d'usage, hors quota d'abonnement. Contexte 1M au tarif standard, 128K de sortie, thinking adaptatif toujours actif, effort `medium` par defaut dans Claude Code (`high` sur l'API). Ecart mesure contre `cost.total_cost_usd` sur une session reelle standard (4 requetes, $0.8032) : 0 % — avant la branche dediee, le script le facturait au tarif Fable 5 (+36,7 % sur cette session). Le tarif fast vient de la table du binaire Claude Code et de la page de prix : il n'a pas ete mesure en session reelle (facture en credits d'usage).
+> **Fable 5.1** — et **Mythos 5.1** (Project Glasswing, meme tier et meme tarif) — sorti le 01/09/2026 : memes $10/$50 et caches write que Fable 5, mais cache read 4x moins cher ($0.25). Sans fast mode. Fable 5.1 et Fable 5 / Mythos 5 (cache read $1) restent servis a leur tarif.
 > **Opus 5.5** — sorti le 22/09/2026, modele par defaut de Claude Code : $4/$20 (20 % sous Opus 5), caches write $5 / $8 et cache read x0.05 ($0.20, 60 % sous Opus 5). Fast mode $8/$40 (x2, Claude API uniquement). Contexte 1M au tarif standard. Opus 5 / Opus 4.8 restent servis a $5/$25.
-> Fast mode : Opus 5.5 ($8/$40), Opus 5 et Opus 4.8 ($10/$50). Opus 4.7 fast ($30/$150) est retire (erreur API desormais, tarif conserve pour les messages historiques) ; Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis, `usage.speed` vaut `standard`) ; le calcul suit le champ `speed` reel de chaque message.
-> **Sonnet 5.5** — sorti le 28/09/2026, alias `sonnet` de Claude Code : meme tarif que Sonnet 5 ($2/$10, caches $2.50 / $4, cache read au multiplicateur standard x0.1 soit $0.20), batch $1/$5. Sans fast mode. Contexte 1M au tarif standard, 128K de sortie. Ecart mesure contre `cost.total_cost_usd` de Claude Code : 0 %.
+> Fast mode : Fable 5.2 / Mythos 5.2 ($16/$80), Opus 5.5 ($8/$40), Opus 5 et Opus 4.8 ($10/$50 ; celui d'Opus 4.8, deprecie le 30/10/2026, sera retire le 30/11/2026). Opus 4.7 fast ($30/$150) est retire (erreur API desormais, tarif conserve pour les messages historiques) ; Opus 4.6 fast a ete retire le 29/06/2026 (facture au tarif standard depuis, `usage.speed` vaut `standard`) ; le calcul suit le champ `speed` reel de chaque message.
+> **Sonnet 5.5** — sorti le 28/09/2026, alias `sonnet` de Claude Code : $2/$10 et caches write $2.50 / $4 comme Sonnet 5, mais **cache read a x0.05 ($0.10)** — au lancement il etait au multiplicateur standard ($0.20) ; le tarif a $0.10 est releve le 10/11/2026 sur la page de prix et dans le catalogue de Claude Code (palier `tier_2_10_cache_read_0_10`, deja present dans la v2.1.317). Batch $1/$5, sans fast mode. Contexte 1M au tarif standard, 128K de sortie. Ecart mesure contre `cost.total_cost_usd` de Claude Code sur une session reelle (4 requetes, $0.1547) : 0 %, contre +8,6 % avec l'ancien tarif.
 > **Haiku 5.5** — sorti le 07/10/2026 (connu de Claude Code depuis la v2.1.293 du 07/10/2026, ou il devient la cible de l'alias `haiku` sur l'API first-party — donc des sub-agents declares `model: haiku` ; Bedrock / Vertex / Foundry restent sur Haiku 4.5) : premier modele a **tarif par palier de longueur de prompt**. Jusqu'a 100K tokens de prompt : $0.10/$0.50 (10x moins cher que Haiku 4.5), caches $0.125 / $0.20 / $0.01, batch $0.05/$0.25. Au-dela : **tout x5, output compris** : $0.50/$2.50, caches $0.625 / $1 / $0.05, batch $0.25/$1.25. Le prompt compte `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` (5 min et 1h confondus) et bascule quand il depasse **strictement** 100 000, requete par requete (tentative par tentative en cas de fallback) — regle identique a celle de Claude Code (`longPrompt.abovePromptTokens` dans son calcul de `total_cost_usd`). Contexte 1M natif, 128K de sortie, thinking adaptatif toujours actif, effort `medium` par defaut (API et Claude Code), sans fast mode ni repli de refus cote serveur. Ecart mesure contre `cost.total_cost_usd` : 0 % sur deux sessions reelles, l'une sous le palier (5 requetes, $0.0053), l'autre au-dessus (prompt de 268K tokens, $0.2554).
 > **Sonnet 5** : le tarif de lancement $2/$10 (annonce comme introductif jusqu'au 31/08/2026) est devenu le tarif definitif — Anthropic a annule la hausse a $3/$15 prevue le 01/09/2026. Sans fast mode.
 > Non pris en compte (non calculables ou sans objet depuis les JSONL Claude Code) : remise Batch API (-50 %), multiplicateur data residency x1.1 (`inference_geo: us` — les logs montrent `not_available`), surcouts fixes du system prompt tool use (deja inclus dans `input_tokens`), prime +10 % des endpoints regionaux Bedrock / Vertex. Le contexte 1M est au tarif standard sur tous les modeles 4.6+ (aucun supplement au-dela de 200K), **a la seule exception de Haiku 5.5** dont le palier > 100K tokens est pris en compte (voir ci-dessus).
@@ -90,15 +93,15 @@ Regle generale des caches : write 5 min = x1.25 du prix input, write 1h = x2, re
 
 Le tarif est choisi par test successif sur la chaine `.message.model` du JSONL (ou `iterations[].model` en cas de fallback), **premier match gagnant** :
 
-`fable-5-1|mythos-5-1` → `fable|mythos` → `opus-5-5` → `opus-5|opus-4-8` → `opus-4-[567]` → `opus-4-1[-@]|opus-4[-@]2025` (legacy) → `opus` → `haiku-5-5` → `haiku` → `sonnet-5` → fallback general.
+`fable-5-2|mythos-5-2` → `fable-5-1|mythos-5-1` → `fable|mythos` → `opus-5-5` → `opus-5|opus-4-8` → `opus-4-[567]` → `opus-4-1[-@]|opus-4[-@]2025` (legacy) → `opus` → `haiku-5-5` → `haiku` → `sonnet-5-5` → `sonnet-5` → fallback general.
 
 Six consequences a garder en tete :
 
 - Le fallback general (modele non reconnu) applique le tarif **Sonnet 4.6** ($3/$15).
 - `opus-5-5` **doit** rester avant `opus-5|opus-4-8` : la regex `opus-5` capture aussi `claude-opus-5-5`, qui serait alors facture au tarif Opus 5 ($5/$25, cache read $0.50 — 2,5x trop cher sur le cache read).
 - Le tarif **legacy** ($15/$75) n'est applique qu'aux deux IDs retires Opus 4 et Opus 4.1 (`claude-opus-4-20250514`, `claude-opus-4-1-20250805`, et leur forme Google Cloud `claude-opus-4-1@20250805`). Tout autre Opus non liste (futur `opus-4-9`, `opus-6`...) tombe dans la branche `opus` generique, **par hypothese** au tarif $5/$25 (fast x2 : $10/$50, comme Opus 5 / 4.8), et un futur `opus-5-x` autre que 5.5 est capture par `opus-5` (tarif Opus 5, fast compris). Un nouvel Opus est donc toujours chiffre, mais son tarif reel est a revalider a chaque sortie (Opus 5.5 est moins cher, Opus 4.1 etait plus cher).
-- Un futur Fable autre que 5.1 (`fable-5-2`...) tomberait dans `fable|mythos` avec le cache read de Fable 5 ($1) : a ajuster si Anthropic reconduit le taux x0.025.
-- `sonnet-5` capture aussi `claude-sonnet-5-5` : Sonnet 5.5 ayant exactement le tarif de Sonnet 5, aucune branche dediee n'est necessaire. Un futur `sonnet-5-x` serait lui aussi facture a $2/$10 : a revalider a chaque sortie (une branche `sonnet-5-x` placee avant `sonnet-5` s'il change de prix).
+- `fable-5-2|mythos-5-2` et `fable-5-1|mythos-5-1` **doivent** rester avant `fable|mythos`, qui les facturerait au tarif Fable 5 ($10/$50, cache read $1 : +36,7 % mesure sur une session Fable 5.2). Un futur Fable autre que 5.1 / 5.2 (`fable-5-3`, `fable-6`...) tomberait dans `fable|mythos` a ce tarif Fable 5 : a revalider a chaque sortie, chaque version ayant change le prix jusqu'ici (cache read x0.025 en 5.1, tarif de base et fast mode en 5.2).
+- `sonnet-5-5` **doit** rester avant `sonnet-5` : la regex `sonnet-5` capture aussi `claude-sonnet-5-5`, qui serait alors facture avec le cache read de Sonnet 5 ($0.20 au lieu de $0.10 : +8,6 % mesure sur une session reelle). Un futur `sonnet-5-x` autre que 5.5 tomberait dans `sonnet-5` a $2/$10 : a revalider a chaque sortie.
 - `haiku-5-5` **doit** rester avant `haiku` : la regex `haiku` capture aussi `claude-haiku-5-5`, qui serait alors facture au tarif Haiku 4.5 ($1/$5 : 10x trop cher sous le palier, 2x trop cher au-dessus). Un futur `haiku-5-x` autre que 5.5 tomberait dans `haiku` au tarif Haiku 4.5 : a revalider a chaque sortie (branche dediee a placer avant `haiku`).
 
 ### Session semaine alignee sur Anthropic
@@ -113,13 +116,13 @@ Hors de ces cas, le `WEEK_START` persiste tel quel, meme si l'API fait glisser s
 
 ### Fast mode
 
-Le fast mode (x2 sur Opus 5.5, Opus 5 et Opus 4.8 ; historiquement x6 sur Opus 4.6/4.7, retire depuis) est detecte de deux manieres :
-- **Affichage ⚡** : lit le champ `.fast_mode` du JSON stdin, etat reel de la session (faux sur un modele sans fast mode, Fable, Sonnet ou Haiku par exemple, meme si `/fast` est memorise) ; repli sur `fastMode` dans `~/.claude/settings.json` si Claude Code est trop ancien pour exposer ce champ
+Le fast mode (x2 sur Fable 5.2 / Mythos 5.2, Opus 5.5, Opus 5 et Opus 4.8 ; historiquement x6 sur Opus 4.6/4.7, retire depuis) est detecte de deux manieres :
+- **Affichage ⚡** : lit le champ `.fast_mode` du JSON stdin, etat reel de la session (faux sur un modele sans fast mode, Fable 5.1, Sonnet ou Haiku par exemple, meme si `/fast` est memorise ; sur Fable 5.2, faux tant que `/fast` n'a pas ete lance sur ce modele, le reglage `fastMode` seul ne suffisant pas) ; repli sur `fastMode` dans `~/.claude/settings.json` si Claude Code est trop ancien pour exposer ce champ
 - **Calcul cout** : lit le champ `speed` de chaque requete dans les JSONL (historique precis)
 
 ### Thinking tokens
 
-Les thinking tokens sont inclus dans `output_tokens` sur le dernier chunk de streaming. Pas besoin de les compter separement. Le detail `usage.output_tokens_details.thinking_tokens` des JSONL recents (thinking toujours actif sur Opus 5.5, Fable 5.1 et Haiku 5.5) en est un sous-ensemble (toujours <= `output_tokens`) : l'ajouter compterait deux fois le thinking.
+Les thinking tokens sont inclus dans `output_tokens` sur le dernier chunk de streaming. Pas besoin de les compter separement. Le detail `usage.output_tokens_details.thinking_tokens` des JSONL recents (thinking toujours actif sur Fable 5.2 / 5.1, Opus 5.5 et Haiku 5.5) en est un sous-ensemble (toujours <= `output_tokens`) : l'ajouter compterait deux fois le thinking.
 
 ## Installation
 
@@ -331,7 +334,7 @@ Claude Code applique l'effort level dans cet ordre (le premier qui matche gagne)
 1. **`CLAUDE_CODE_EFFORT_LEVEL` env var** — override absolu. Quand elle est posee, `/effort <X>` UI est bloquee : Claude Code repond `CLAUDE_CODE_EFFORT_LEVEL=<X> overrides this session — clear it and <Y> takes over`.
 2. **`/effort <X>` UI dans la session courante** — override session-only.
 3. **Niveau memorise dans `~/.claude/settings.json`** — baseline persistante. Depuis Claude Code v2.1.251, `/effort` l'enregistre par modele (`modelSettings.<id>.effortLevel`), prioritaire sur la cle `effortLevel` de premier niveau. Cette ancienne cle ne s'applique plus a Opus 5.5 (ni aux modeles ulterieurs) dans le fichier utilisateur.
-4. **Defaut modele** — `medium` sur Opus 5.5, Sonnet 5.5 et Haiku 5.5 (pour Sonnet 5.5 c'est un defaut propre a Claude Code, l'API restant a `high` ; Opus 5.5 et Haiku 5.5 sont a `medium` cote API aussi), `xhigh` sur Opus 4.7, `high` sur tous les autres modeles a effort (Opus 4.8 / 5, Fable 5 / 5.1, Sonnet 5...).
+4. **Defaut modele** — `medium` sur Fable 5.2 / Mythos 5.2, Opus 5.5, Sonnet 5.5 et Haiku 5.5 (pour Fable 5.2 et Sonnet 5.5 c'est un defaut propre a Claude Code, l'API restant a `high` ; Opus 5.5 et Haiku 5.5 sont a `medium` cote API aussi), `xhigh` sur Opus 4.7, `high` sur tous les autres modeles a effort (Opus 4.8 / 5, Fable 5 / 5.1, Sonnet 5...).
 
 La statusline lit en priorite le champ **`.effort.level` du JSON stdin** transmis par Claude Code : c'est la valeur live deja resolue (elle reflete `/effort` en cours de session, l'env var, `settings.json` et le defaut modele). Cas particulier **ultracode** : Claude Code le mappe en interne sur `xhigh`, donc `.effort.level` renvoie `xhigh` (indistinct d'un vrai xhigh) ; pour l'afficher distinctement (`▌▌▌▌▌ ✦`), la statusline ne leve l'ambiguite que dans ce cas, en lisant le dernier `Set effort level to ultracode` du transcript.
 
