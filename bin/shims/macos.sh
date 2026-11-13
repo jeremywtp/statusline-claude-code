@@ -20,6 +20,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
   if [[ -x "$_GNU/gfind" ]]; then
     find() { "$_GNU/gfind" "$@"; }
   fi
-  export -f stat date find md5sum grep 2>/dev/null
+  # Pas de « export -f » : un script bash lancé par celui-ci hériterait de ces fonctions sans
+  # la variable _GNU, et son grep ou son date ne trouveraient plus rien. Les sous-shells du
+  # script ( … ) les voient sans export.
 fi
 # -- END macOS compat shim ------------------------------------------------
