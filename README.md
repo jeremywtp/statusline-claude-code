@@ -1,6 +1,8 @@
 # Claude Code Statusline
 
-Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j (+ quota Fable 7j dedie) avec calcul de cout reel depuis les logs JSONL.
+Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI — modele, git, contexte, cout session, quotas 5h/7j (+ quota Fable 7j dedie) avec calcul de cout reel depuis les logs JSONL. Sur un serveur, la première ligne dit où l'on est et comment va la machine.
+
+> **Branche `serveur`** : version durcie, avec le [mode serveur](#mode-serveur) et son installeur (`serveur/installer.sh`). La statusline de poste, celle qu'installe `npx github:jeremywtp/statusline-claude-code`, reste sur la branche `main`.
 
 ## Preview
 
@@ -8,6 +10,14 @@ Statusline 3 lignes pour [Claude Code](https://docs.anthropic.com/en/docs/claude
 Opus 5.5 ▌▌▌▌▌ │ my-project │ v2.1.280 ●
 ██████░░░░░░░░░ 40% │ $1.24 │ 3m 22s │ * main +2 ~1 ?3 ↑3 ↓1
 5h ▰▰▰▰▱▱▱▱▱▱ 40% 3h12m $18.50 │ 7j ▰▱▱▱▱▱▱▱▱▱ 18% 5j 8h $142.50 │ Fable 14%
+```
+
+Sur un serveur (voir [Mode serveur](#mode-serveur)) :
+
+```
+ WEB-PROD  │ CPU 6% │ RAM 41% │ disque 78% · data 41%
+Opus 5.5 ▌▌▌▌▌ │ …/apps/mon-site.fr │ v2.1.323 ●
+██████░░░░░░░░░ 40% │ 7j ▰▱▱▱▱▱▱▱▱▱ 18% 5j 8h │ Fable 14% │ * main ~2 │ pm2 ● en ligne ↺4
 ```
 
 ## Fonctionnalites
@@ -36,17 +46,82 @@ Opus 5.5 ▌▌▌▌▌ │ my-project │ v2.1.280 ●
 - Cout de la session courante (USD)
 - Duree de la session
 - Branche git avec fichiers staged (`+`), modifies (`~`), untracked (`?`), commits non pousses (`↑` cyan) et commits remote non recuperes (`↓` jaune)
-- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (`& disown` — le statusline tourne sous bash, contrairement au hook `UserPromptSubmit` decrit plus bas qui doit rester POSIX) pour que `↓N` reste a jour sans bloquer le rendu (lock par repo dans `/tmp/claude-sl-<uid>-fetch-<cksum>`)
+- **Auto-fetch en background** : si l'upstream est tracke et que le dernier fetch date de plus de 5 min, lance `git fetch --quiet --no-tags` en detache (`& disown` — le statusline tourne sous bash, contrairement au hook `UserPromptSubmit` decrit plus bas qui doit rester POSIX) pour que `↓N` reste a jour sans bloquer le rendu (au plus un fetch toutes les 5 min par session, les trois descripteurs fermés ; **jamais en mode serveur**)
 
 **Ligne 3 — Quotas d'utilisation**
 - Quota 5 heures : mini-barre + pourcentage + timer avant reset + **cout 5h**. Le segment est **masque** (separateur compris) tant que l'API ne rapporte pas de fenetre 5h en cours : `five_hour: null` (observe depuis le 31/10/2026 sur Max 20x, ou seules les limites hebdo `weekly_all` / `weekly_scoped` restent exposees) ou `resets_at` deja passe — meme regle que Claude Code, qui documente ce champ comme optionnel. Il revient de lui-meme des que l'API rapporte une fenetre
 - Quota 7 jours : mini-barre + pourcentage + timer avant reset + **cout hebdo reel** (`seven_day`, sinon l'entree `weekly_all` de `limits[]`)
 - **Quota Fable 7j** : pourcentage seul, label or/ambre — Fable (5, 5.1 et 5.2) a sa propre limite hebdo, exposee par l'API dans `limits[]` (premiere entree `weekly_scoped` dont `scope.model.display_name` **contient** `fable` — test regex insensible a la casse, pas une egalite stricte, donc valable quelle que soit la version : verifie en session Fable 5.2 le 10/11/2026). Le segment est masque si le compte n'a pas de limite dediee
-- Donnees recuperees via l'API OAuth Anthropic (cache 300s, backoff 429 10min, verrou mkdir multi-instances). Une reponse est acceptee des qu'elle est un objet JSON portant `five_hour`, `seven_day` ou `limits` (meme a `null`) : exiger un `five_hour` non null figeait les pourcentages sur le dernier cache quand le compte n'a pas de fenetre 5h
+- Pourcentages et fins de fenêtre : ceux que Claude Code transmet au script (`rate_limits`), donc ceux du compte réellement utilisé par la session ; à défaut, ceux de l'API OAuth Anthropic, interrogée **en arrière-plan** (cache 300s, backoff 429 10min, un seul rafraîchissement à la fois). Le quota Fable vient de l'API. Une reponse est acceptee des qu'elle est un objet JSON portant `five_hour`, `seven_day` ou `limits` (meme a `null`) : exiger un `five_hour` non null figeait les pourcentages sur le dernier cache quand le compte n'a pas de fenetre 5h
+
+## Mode serveur
+
+Un fichier `/etc/claude-statusline.conf` (root) fait d'une machine un serveur. La statusline tient alors sur trois lignes : la ligne du serveur en tête, la ligne du modèle avec le dossier courant et son parent (`…/apps/mon-site.fr`), puis une seule ligne qui regroupe le contexte, les quotas, la branche git et l'état PM2 de l'app dans laquelle on se trouve. Quand la place manque sur cette dernière, la mini-barre du quota raccourcit puis s'efface, la barre de contexte raccourcit, puis les segments partent du moins utile au plus utile ; le contexte et le quota 7 j restent toujours.
+
+Sur un serveur elle est **allégée** : ce qui ne sert pas pendant une maintenance n'est pas affiché.
+
+| Sur un serveur | Pourquoi | Réglage |
+|---|---|---|
+| Pas de montants en dollars (session, 5 h, 7 j) | Sur un abonnement, ces montants ne correspondent à aucune facture. Du même coup, aucun JSONL n'est lu | `COUTS=1` pour les afficher |
+| Pas d'usage 5 h | Le quota 7 j et le quota Fable suffisent | — |
+| Pas de durée de session | Aucune décision n'en dépend | — |
+| Pas de `git fetch` automatique | Écrit dans `.git`, prend des verrous, utilise les identifiants du serveur | `AUTOFETCH=1` pour l'activer |
+| Quota Fable, version de Claude Code et point de statut : **gardés** | Le quota Fable passe par l'API des quotas (jeton donné à `curl` par son entrée standard), le point de statut par status.claude.com | `QUOTA_API=0` et `STATUT_CLAUDE=0` pour couper ces deux appels |
+
+Tant qu'aucun quota n'est connu (ni transmis par Claude Code, ni reçu de l'API), la ligne des quotas n'est pas affichée.
+
+```
+SERVEUR=WEB-PROD
+NIVEAU=critique
+DISQUES=/ /mnt/data
+```
+
+| Clé | Rôle |
+|---|---|
+| `SERVEUR` | Nom affiché dans le badge. Sa présence active le mode serveur |
+| `NIVEAU` | Couleur du badge : `critique` rouge, `prod` orange, `outils` bleu, `secours` gris |
+| `DISQUES` | Points de montage surveillés, séparés par des espaces |
+| `COUTS`, `AUTOFETCH` | `0` ou `1` : montants en dollars, fetch automatique (à `0` sur un serveur, à `1` sur un poste) |
+| `QUOTA_API`, `STATUT_CLAUDE` | `0` ou `1` : API des quotas (quota Fable), point de statut (à `1` partout) |
+
+Le fichier est **lu, jamais exécuté** : chaque valeur doit tenir en 60 caractères ASCII sans caractère de commande, sinon elle est ignorée. Quand `/etc/claude-statusline.conf` existe, lui seul compte ; sans lui, `~/.config/claude-statusline.conf` permet les mêmes réglages sur un poste.
+
+La ligne du serveur montre toujours le badge, le processeur, la mémoire prise et les disques. Le processeur est la part du temps où les cœurs ont travaillé depuis l'affichage précédent (compteurs de `/proc/stat`, comme `htop` ; il apparaît au deuxième affichage, le premier servant de point de départ). Quand la mémoire dépasse 80 %, le nom et le poids du plus gros consommateur suivent (`RAM 95% · mon-site.fr 6,1 Go`) : le nom de l'app si le programme tourne depuis `/var/www/apps/<app>`, sinon celui du programme, jamais ses arguments. Le reste n'apparaît que s'il y a quelque chose à dire : pression mémoire (PSI, à partir de 5 %), apps PM2 à l'arrêt ou en erreur, builds Next en cours, autre session Claude ouverte sur la machine. Le swap n'est pas affiché : plein en permanence sur certains serveurs sans que rien n'attende de mémoire, il ne dit rien. Ce qui demande de l'attention passe en jaune puis en rouge, et c'est ce qui reste affiché quand la place manque ; les alertes qui ne tiennent pas sont comptées en fin de ligne (`+2 alertes`). Redémarrage demandé et mises à jour en attente ne sont pas affichés : sur un parc de serveurs ils sont presque toujours vrais, donc muets.
+
+Deux variables d'environnement, si le lanceur de la session les pose : `STATUSLINE_OPERATOR` (nom de l'opérateur, affiché après le badge) et `STATUSLINE_ACCOUNT` (compte affiché en fin de ligne des quotas). Elles sont validées (`[A-Za-z0-9._-]`, 24 caractères) avant affichage.
+
+### Installer sur un serveur
+
+Pas de `npx` sur un serveur : `serveur/installer.sh` pose un script dont l'empreinte a été vérifiée, sans rien télécharger.
+
+```bash
+sha256sum statusline.sh                       # empreinte du script relu
+sudo bash serveur/installer.sh --source statusline.sh --empreinte <sha256> \
+  --serveur WEB-PROD --niveau critique --disques "/ /mnt/data"            # montre le plan
+sudo bash serveur/installer.sh … --appliquer                                                          # écrit
+```
+
+Il installe `/usr/local/lib/claude-statusline/statusline.sh` (root, 755), `/etc/claude-statusline.conf` (root, 644) et met la statusline en service dans `/etc/claude-code/managed-settings.json` (tous les comptes de la machine ; `--portee compte` pour le seul compte courant), avec `refreshInterval` à 2 s (`--intervalle` pour changer) : le processeur et la mémoire bougent à l'écran comme dans `htop`, voir [Rafraîchissement en direct](#rafraîchissement-en-direct-de-la-ligne-du-serveur). Les autres clés des réglages sont conservées, chaque fichier remplacé est copié à côté avec la date, `--retirer` défait tout.
+
+## Largeur du terminal
+
+Claude Code donne la largeur du terminal dans `COLUMNS`. Chaque ligne s'y adapte sans jamais couper un segment au milieu : les segments les moins importants partent en premier (version, durée, coût de session, rôle du serveur), puis les mini-barres de quota passent de 10 à 5 blocs, puis les coûts et les barres s'effacent. Sans `COLUMNS`, le rendu est complet.
+
+## Sécurité
+
+- **Jeton OAuth** : donné à `curl` par son entrée standard (`-K -`), jamais en argument (une ligne de commande se lit par tous les comptes d'une machine). Retiré de l'environnement dès le début du script : ni `git`, ni `jq`, ni `pm2` n'en héritent. Jamais écrit sur disque.
+- **Affichage** : la sortie s'écrit avec `printf '%s'`, qui n'interprète rien, et tout texte venu de l'extérieur (dossier, branche, modèle, agent, session, cache, réglage) est débarrassé de ses caractères de contrôle. Un dossier nommé `x\033[41m…` s'affiche tel quel.
+- **Calcul** : aucun `eval`. Toute valeur passe par une validation de nombre avant d'entrer dans une opération arithmétique (bash évalue `a[$(commande)]` comme une expression).
+- **Cache** : `~/.cache/claude-statusline/<profil>/`, dossier 700 et fichiers 600 quel que soit le masque de la session, refusé si c'est un lien ou s'il appartient à un autre compte. Plus rien dans `/tmp`. Son contenu reste relu comme une donnée douteuse.
+- **Git** : un seul `git status --porcelain=v2`, avec `--no-optional-locks` (n'écrit jamais l'index) et `-c core.fsmonitor=false` (une commande déclarée par le dépôt n'est pas lancée). Pas de `fetch` en mode serveur.
+- **PM2** : interrogé seulement si le démon du compte tourne déjà. La sortie de `pm2 jlist` (qui porte l'environnement des apps) ne quitte pas le tube : seuls le dossier, le nom, l'état et le nombre de redémarrages sont gardés.
+- **Temps** : le rendu ne fait aucun appel réseau et ne lit aucun JSONL. API des quotas, statut de Claude, coûts et état du serveur sont rafraîchis par un processus détaché, un seul à la fois.
 
 ## Calcul des couts
 
 Les couts (5h et hebdo) sont calcules localement a partir des fichiers JSONL de conversation (`~/.claude/projects/**/*.jsonl`), en utilisant les prix officiels Anthropic. Le scan est limite aux fichiers modifies dans les 7 derniers jours (`find -mtime -7`) et ne retient que les messages `type == "assistant"` posterieurs au debut de la fenetre hebdo.
+
+Chaque JSONL donne un **extrait** gardé dans le cache et refait seulement quand le JSONL a changé : après le premier passage, seules les sessions en cours sont relues (mesuré sur 226 fichiers et 2,6 Go : 12 s de rendu bloqué avec l'ancienne lecture complète, 4 s en arrière-plan au premier passage, 0,6 s ensuite). La lecture se fait ligne par ligne : une ligne tronquée est ignorée au lieu d'arrêter la lecture des fichiers suivants.
 
 Les messages sont **dedupliques par `requestId`** (`group_by(.reqId) | map(last)`) : le streaming ecrit plusieurs lignes JSONL pour une meme requete, seule la derniere porte les compteurs de tokens definitifs.
 
@@ -104,15 +179,9 @@ Six consequences a garder en tete :
 - `sonnet-5-5` **doit** rester avant `sonnet-5` : la regex `sonnet-5` capture aussi `claude-sonnet-5-5`, qui serait alors facture avec le cache read de Sonnet 5 ($0.20 au lieu de $0.10 : +8,6 % mesure sur une session reelle). Un futur `sonnet-5-x` autre que 5.5 tomberait dans `sonnet-5` a $2/$10 : a revalider a chaque sortie.
 - `haiku-5-5` **doit** rester avant `haiku` : la regex `haiku` capture aussi `claude-haiku-5-5`, qui serait alors facture au tarif Haiku 4.5 ($1/$5 : 10x trop cher sous le palier, 2x trop cher au-dessus). Un futur `haiku-5-x` autre que 5.5 tomberait dans `haiku` au tarif Haiku 4.5 : a revalider a chaque sortie (branche dediee a placer avant `haiku`).
 
-### Session semaine alignee sur Anthropic
+### Fenêtre de la semaine
 
-Le script persiste le debut de la fenetre hebdomadaire dans `~/.claude/week-session` pour eviter les derives du `resets_at` (API rolling). La fenetre est recalculee dans trois cas :
-
-1. la session a reellement expire (`now >= resets_at` stocke) ;
-2. l'API renvoie un `resets_at` different de celui stocke (reset server-side anticipe par Anthropic) ;
-3. premier run — aucun `resets_at` stocke, ou valeur illisible.
-
-Hors de ces cas, le `WEEK_START` persiste tel quel, meme si l'API fait glisser son `resets_at`.
+Le début de la semaine est la fin de fenêtre connue moins 7 jours : celle que Claude Code transmet (`rate_limits.seven_day.resets_at`), sinon celle de l'API, sinon la dernière en cache. Si la fin connue est déjà passée (API muette depuis), la fenêtre suivante a commencé à cette date : le début avance par pas de 7 jours. Les bornes sont converties en UTC par `jq` pour être comparées aux horodatages des JSONL, quel que soit le fuseau de la machine.
 
 ### Fast mode
 
@@ -268,35 +337,39 @@ Le commentaire shell `# scc-fetch-hook` est un marqueur inerte qui sert a `npx .
 
 ## Fichiers et cache
 
-Tous les fichiers `/tmp` sont prefixes par l'UID de l'utilisateur (`/tmp/claude-sl-$(id -u)-...`, multi-user safe) — note `<uid>` ci-dessous — suivi, pour un profil autre que `~/.claude`, du suffixe de profil (voir [Plusieurs comptes Claude](#plusieurs-comptes-claude-claude_config_dir)). Les caches par repertoire sont suffixes par le `cksum` du chemin du projet. Les fichiers `~/.claude/...` ci-dessous vivent dans le dossier du profil (`$CLAUDE_CONFIG_DIR` s'il est defini).
+Le cache vit dans `~/.cache/claude-statusline/<profil>/` (`defaut` pour `~/.claude`, sinon le chemin de `CLAUDE_CONFIG_DIR` rendu en nom de dossier ; `$XDG_CACHE_HOME` est respecté). Dossier 700, fichiers 600. Chaque fichier commence par `v3|<date d'écriture>|` ; un fichier d'un autre format est ignoré.
 
-| Fichier | Description | TTL |
+| Fichier | Description | Durée |
 |---|---|---|
-| `~/.claude/statusline.sh` | Script principal | — |
+| `~/.claude/statusline.sh` | Script principal (`/usr/local/lib/claude-statusline/statusline.sh` sur un serveur) | — |
 | `~/.claude/settings.json` | Config Claude Code (statusLine) | — |
-| `~/.claude/week-session` | Persistance fenetre hebdo (`resets_at\|WEEK_START`) | Jusqu'au reset |
-| `~/.claude/usage-session` | Persistance durable API usage (5 champs : %, timers, quota Fable) — fallback si cache /tmp vide | Jusqu'au prochain succes API |
-| `/tmp/claude-sl-<uid>-usage-cache` | Cache API OAuth (quotas 5h/7j/Fable + couts, 7 champs) | 300s |
-| `/tmp/claude-sl-<uid>-usage-backoff` | Backoff 429 — empeche les appels API pendant 10 min | 600s |
-| `/tmp/claude-sl-<uid>-usage.lock.d` | Verrou mkdir — un seul appel API a la fois (multi-instances, casse si orphelin > 30s) | — |
-| `/tmp/claude-sl-<uid>-git-<cksum>` | Cache git status par repertoire (incl. `↑N ↓N` ahead/behind) | 5s |
-| `/tmp/claude-sl-<uid>-fetch-<cksum>` | Lock auto-fetch par repertoire — empeche les fetch trop frequents | 300s |
-| `/tmp/claude-sl-<uid>-status-cache` | Cache status Claude (status.claude.com) | 60s |
-| `/tmp/claude-sl-<uid>-week-raw-XXXXXX` | `mktemp` par process — lignes JSONL brutes de la fenetre hebdo. Supprime en fin de calcul ; les orphelins de plus de 5 min sont purges au run suivant | Ephemere |
-| `/tmp/claude-sl-<uid>-api-XXXXXX` | `mktemp` par process — corps de la reponse API OAuth, supprime apres lecture | Ephemere |
+| `usage` | Quotas 5h / 7j / Fable de l'API et coûts 5h / 7j | 300s |
+| `usage-pause` | Posé après un 429 : pas d'appel à l'API pendant 10 min | 600s |
+| `statut` | Statut de Claude (status.claude.com) | 60s |
+| `serveur`, `pm2-apps` | Mode serveur : PM2, builds, sessions, disques, plus gros consommateur de mémoire ; dossier, nom et état de chaque app | 45s |
+| `cpu` | Mode serveur : dernier relevé des compteurs du processeur | 5s au moins entre deux relevés |
+| `git-<session>` | État git du dossier courant de la session, date du dernier fetch | 5s |
+| `trame-<session>` | Mode serveur : les trois lignes du dernier rendu complet et l'entrée reçue, pour la voie rapide | 15s |
+| `extraits/` | Un extrait par JSONL (usage par requête), refait quand le JSONL change | 8 jours |
+| `verrou.d/` | Verrou `mkdir` du rafraîchissement d'arrière-plan (PID et date ; repris si le processus n'existe plus) | — |
 
-## Resilience API
+Les anciens fichiers (`/tmp/claude-sl-<uid>-*`, `~/.claude/usage-session`, `~/.claude/week-session`) ne sont plus lus ni écrits : ils peuvent être supprimés.
 
-L'API `/api/oauth/usage` est sujette a du rate limiting (429). Le script combine plusieurs mecanismes de protection :
+## Rafraîchissement d'arrière-plan
 
-- **Backoff 429** : apres un 429, attend 10 min avant de reessayer (`/tmp/claude-sl-usage-backoff`)
-- **Verrou mkdir** : un seul process appelle l'API a la fois (`mkdir` atomique, portable macOS/Linux — un verrou orphelin est casse apres 30s). Les autres instances utilisent le cache
-- **Fallback 3 niveaux** pour ne jamais perdre les donnees :
-  1. **API OK (200)** — met a jour le cache `/tmp` + le fichier durable `~/.claude/usage-session`
-  2. **API echouee + cache existant** — recalcule les couts depuis les JSONL, preserve les quotas du cache
-  3. **Cache vide** — lit le fichier durable (survit aux reboots et purges /tmp)
+Le rendu ne lit que le cache. Quand un fichier est périmé, il lance `statusline.sh --rafraichir` en processus détaché (`setsid` quand il existe, entrée et sorties fermées) : Claude Code n'attend pas sa fin et peut annuler un rendu sans l'interrompre. Un seul rafraîchissement tourne à la fois par profil, à la priorité la plus basse.
 
-Le header `User-Agent: claude-code/<version>` est obligatoire pour l'API.
+- **API des quotas** (`/api/oauth/usage`, sujette au rate limiting) : sur 429, pause de 10 min ; en cas d'échec, les dernières valeurs connues restent affichées. Le header `User-Agent: claude-code/<version>` est obligatoire.
+- **Statut de Claude** : point gris tant que l'état n'est pas connu (premier rendu, réseau muet), jamais un faux vert.
+- **Premier rendu** : les quotas transmis par Claude Code s'affichent tout de suite ; quota Fable et coûts arrivent au rendu suivant. Régler `refreshInterval` dans `statusLine` (15 à 30 s) fait apparaître les valeurs sans attendre le prochain message.
+
+## Rafraîchissement en direct de la ligne du serveur
+
+Sur un serveur, Claude Code relance le script toutes les 2 secondes (`refreshInterval`). Refaire tout le rendu à chaque fois coûterait un `jq`, un `git` et la lecture du fichier entier. Quand rien n'a changé dans ce que Claude Code transmet (hors durée de session), le script prend une **voie rapide** placée en tête de fichier : il reprend telles quelles les trois lignes du dernier rendu complet, ne recalcule que la ligne du serveur à partir de `/proc`, et s'arrête ; la suite du fichier n'est ni lue ni exécutée.
+
+Un rendu complet revient dès que l'entrée change (nouvelle réponse, autre dossier), que la largeur du terminal change, qu'un cache d'arrière-plan vient d'être rafraîchi, ou au bout de 15 secondes. Une trame qui porterait autre chose que des couleurs est refusée.
+
+Mesuré le 13/11/2026 sur des serveurs en service, script en mémoire : 13 à 39 ms par affichage en voie rapide, 38 à 107 ms par rendu complet. À 2 secondes d'intervalle, cela fait de l'ordre de 1 à 3 % d'un cœur par session ouverte (estimation à partir de ces mesures), et rien quand aucune session n'est ouverte. Disque, PM2, builds et sessions restent relevés toutes les 45 secondes : ils ne bougent pas plus vite.
 
 ## Plusieurs comptes Claude (`CLAUDE_CONFIG_DIR`)
 
@@ -305,11 +378,13 @@ Un second compte Claude tourne dans son propre profil : `CLAUDE_CONFIG_DIR=~/.cl
 | Element | Profil par defaut (`~/.claude`) | Autre profil (`CLAUDE_CONFIG_DIR`) |
 |---|---|---|
 | Jeton OAuth (quotas 5h / 7j / Fable) | Trousseau `Claude Code-credentials` (macOS) ou `~/.claude/.credentials.json` (Linux) | Trousseau `Claude Code-credentials-<8 hex>` (macOS) ou `<profil>/.credentials.json` (Linux) — **jamais** de repli sur le jeton du profil par defaut |
-| Caches `/tmp` (usage, backoff, verrou, git, status) | `/tmp/claude-sl-<uid>-...` | `/tmp/claude-sl-<uid>-<8 hex>-...` |
-| Fichiers durables (`usage-session`, `week-session`) et `settings.json` lu en repli | `~/.claude/` | `<profil>/` |
+| Cache (quotas, coûts, statut, git, verrou) | `~/.cache/claude-statusline/defaut/` | `~/.cache/claude-statusline/<chemin du profil>/` |
+| `settings.json` lu en repli | `~/.claude/` | `<profil>/` |
 | JSONL scannes pour les couts | `~/.claude/projects/` | `<profil>/projects/` |
 
 `<8 hex>` = les 8 premiers caracteres du sha256 du chemin `CLAUDE_CONFIG_DIR` tel qu'il est exporte : c'est le suffixe que Claude Code donne lui-meme a l'entree Trousseau du profil.
+
+Quand la session reçoit son jeton par l'environnement (`CLAUDE_CODE_OAUTH_TOKEN`, cas d'un lanceur qui choisit le compte), c'est ce jeton qui interroge l'API, pas celui du fichier du profil : les quotas affichés sont ceux du compte qui paie la session.
 
 Un seul script sert tous les profils : l'installeur ecrit `~/.claude/statusline.sh` et `~/.claude/settings.json`, et un profil qui partage sa configuration par liens symboliques (`<profil>/settings.json -> ~/.claude/settings.json`, idem `statusline.sh`) en herite sans reinstallation. L'installeur ecrit a travers ces liens sans les remplacer.
 
@@ -321,7 +396,7 @@ Claude Code pipe un objet JSON via stdin a chaque render. Le script le parse en 
 
 Le git n'est **pas** dans ce JSON : la branche et les compteurs (staged / modifies / untracked, ahead / behind) sont obtenus en lancant de vraies commandes `git` dans le repertoire transmis par le JSON (`workspace.current_dir`).
 
-Les donnees couteuses (git status, API usage) sont cachees dans `/tmp/` pour eviter les ralentissements. Les couts (5h et hebdo) sont recalcules a chaque refresh du cache usage (300s) en scannant les fichiers JSONL du repertoire `~/.claude/projects/` (batch `find -exec +` pour performance).
+Rien de lent ne se fait dans le rendu : git est mis en cache 5 secondes par session, et l'API des quotas, le statut, les coûts et l'état du serveur sont tenus à jour par le [rafraîchissement d'arrière-plan](#rafraîchissement-darrière-plan). Mesuré sur un Mac M-series, caches chauds : 15 ms par rendu (86 ms auparavant) ; sur les serveurs, 40 à 110 ms sans cache selon la machine (`jq` 1.6 d'Ubuntu 22.04 met à lui seul 30 ms à démarrer).
 
 ## Compatibilite
 
@@ -356,6 +431,16 @@ local-command-stdout>Set effort level to \K\w+(?=[^<>]{0,200}</local-command-std
 ```
 
 Le lookahead 200 chars couvre toutes les descriptions (jusqu'a ~95 chars pour `high`) tout en restant anti-faux-positif (le code source du statusline lu via Read et stocke dans le JSONL n'a pas `</local-command-stdout>` a proximite immediate).
+
+## Essais
+
+```bash
+tests/essais.sh        # 106 essais, dans un dossier temporaire : aucun réseau, aucun vrai jeton
+tests/essais.sh -v     # avec les rendus
+tests/couts-reels.sh   # coûts de la branche main et de la version courante sur vos transcriptions (lecture seule)
+```
+
+La suite couvre le rendu, l'absence de fichier hors du cache, le trajet du jeton, l'injection par l'affichage et par le calcul, les entrées dégradées, la largeur (34 à 200 colonnes), les quotas, les coûts (calcul à la main, lecture incrémentale, ligne tronquée), l'attente du réseau et de git, la comparaison avec la branche `main`, le mode serveur et l'installation sur un serveur. Sur macOS elle insère le shim GNU comme le fait l'installeur.
 
 ## Licence
 
