@@ -12,6 +12,7 @@
   "files": [
     "bin/",
     "statusline.sh",
+    "serveur/",
     "README.md"
   ],
   "repository": {
