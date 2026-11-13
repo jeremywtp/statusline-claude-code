@@ -195,7 +195,7 @@ export async function uninstall({ flags }) {
   }
 
   log.info('');
-  log.info(`${C.dim}Les caches /tmp/claude-sl-* expireront d'eux-memes.${C.reset}`);
+  log.info(`${C.dim}Le cache ~/.cache/claude-statusline peut etre supprime ; les anciens /tmp/claude-sl-* aussi.${C.reset}`);
 }
 
 export async function doctor() {
