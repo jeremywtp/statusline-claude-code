@@ -504,11 +504,9 @@ if usage_cache_stale && ! usage_in_backoff; then
     API_OK=1
     USAGE_DATA=$(echo "$API_RESP" | jq -r '
       [
-        # Quota 5h : five_hour, sinon l entree session du tableau limits (meme limite, nouveau
-        # schema). Chaine vide si le compte n a pas de limite 5h ou pas de fenetre en cours
-        # (segment masque)
-        (.five_hour.utilization // ([.limits[]? | select(.kind == "session")] | first | .percent) // "" | tostring),
-        (.five_hour.resets_at // ([.limits[]? | select(.kind == "session")] | first | .resets_at) // "" | tostring),
+        # Quota 5h : chaine vide si l API ne rapporte pas de fenetre 5h (segment masque)
+        (.five_hour.utilization // "" | tostring),
+        (.five_hour.resets_at // "" | tostring),
         # Quota 7j : seven_day, sinon l entree weekly_all du tableau limits
         (.seven_day.utilization // ([.limits[]? | select(.kind == "weekly_all")] | first | .percent) // 0 | tostring),
         (.seven_day.resets_at // ([.limits[]? | select(.kind == "weekly_all")] | first | .resets_at) // "" | tostring),
@@ -826,8 +824,7 @@ fi
 IFS='|' read -r PCT_5H RESET_5H_ISO PCT_7D RESET_7D_ISO PCT_FABLE WEEK_COST BLOCK_COST <<< "$USAGE_DATA"
 WEEK_COST="${WEEK_COST:-0}"
 BLOCK_COST="${BLOCK_COST:-0}"
-# Quota 5h : vide si le compte n'a pas de limite 5h ou pas de fenetre en cours (segment masque,
-# comme Fable). Une fenetre du cache deja echue est masquee plus bas, au calcul du timer.
+# Quota 5h : vide si l'API ne rapporte pas de fenetre 5h en cours (segment masque, comme Fable)
 PCT_5H_INT=""
 if [ -n "${PCT_5H:-}" ]; then
   PCT_5H_INT=$(printf '%.0f' "$PCT_5H" 2>/dev/null) || PCT_5H_INT=""
@@ -879,14 +876,6 @@ if [ "$REMAIN_5H" -gt 0 ]; then
   TIMER_5H="${REMAIN_5H_H}h${REMAIN_5H_M}m"
 else
   TIMER_5H="--"
-fi
-# Fenetre 5h du cache deja echue : ce n'est plus une fenetre, son pourcentage date d'avant le
-# reset. Cas d'une API en echec depuis l'echeance (jeton expire, 429 en backoff, reseau) ou d'un
-# cache pas encore rafraichi : le repli garde les quotas du dernier appel reussi, 5h compris.
-# Segment masque, meme regle que lorsque l'API vient de repondre ; il revient au prochain appel
-# reussi si le compte a une limite 5h. Un epoch a 0 (date -d indisponible) ne masque rien.
-if [ -n "$RESET_5H_ISO" ] && [ "${RESET_5H_EPOCH:-0}" -gt 0 ] && [ "$REMAIN_5H" -le 0 ]; then
-  PCT_5H_INT=""
 fi
 
 # --- Timer 7j ---
