@@ -468,16 +468,18 @@ verifie "processeur, mémoire et disques toujours affichés" '[[ $L0 == " WEB-PR
 verifie "PM2 : une app en erreur signalée" '[[ $L0 == *"PM2 2/3 · 1 en erreur"* ]]' "$L0"
 verifie "build en cours (compté une fois, sans le shell qui le lance) et autres sessions Claude signalés" '[[ $L0 == *"1 build en cours"* && $L0 == *"2 sessions Claude"* ]]' "$L0"
 verifie "redémarrage demandé et mises à jour en attente ne sont pas affichés (toujours vrais, donc muets)" '[[ $L0 != *màj* && $L0 != *redémarrage* ]]' "$L0"
-verifie "sur un serveur : ni durée de session, ni montant en dollars, ni usage 5 h" '[[ $T != *"1m 1s"* && $T != *"\$"* && $T != *"5h "* ]]' "$(tr '\n' '/' <<< "$T")"
+verifie "sur un serveur : ni durée de session, ni montant en dollars" '[[ $T != *"1m 1s"* && $T != *"\$"* ]]' "$(tr '\n' '/' <<< "$T")"
 verifie "version de Claude Code et point de statut affichés, comme sur un poste" '[[ $(sed -n 2p <<< "$T") == *"│ v2.1.323 ●" ]]' "$(sed -n 2p <<< "$T")"
-verifie "ligne 3 : contexte, quota 7 j, quota Fable et état de l'app sur une seule ligne" '[[ $(sed -n 3p <<< "$T") == "█░░░░░░░░░░░░░░ 12% │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% 5j "*" │ Fable 14% │ pm2 ● en ligne ↺3" ]]' "$(sed -n 3p <<< "$T")"
+verifie "ligne 3 : contexte, usage 5 h, quota 7 j, quota Fable et état de l'app sur une seule ligne" '[[ $(sed -n 3p <<< "$T") == "█░░░░░░░░░░░░░░ 12% │ 5h ▰▰▱▱▱▱▱▱▱▱ 23% 3h1"[12]"m │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% 5j "*" │ Fable 14% │ pm2 ● en ligne ↺3" ]]' "$(sed -n 3p <<< "$T")"
 verifie "le jeton part à l'API des quotas par l'entrée standard, jamais en argument" 'grep -q "oauth/usage" "$S/out/curl-argv.log" && ! grep -q "JETON" "$S/out/curl-argv.log" && grep -q "Bearer JETON" "$S/out/curl-stdin.log"'
 verifie "sans montants à calculer, aucune transcription n'est lue" '[ -z "$(find "$CACHE" -name extraits)" ]' "$(find "$CACHE" -maxdepth 2 | sed "s#$CACHE/##" | tr '\n' ' ')"
 verifie "le swap n'est pas affiché" '[[ $L0 != *swap* ]]'
 verifie "ligne 1 : dossier avec son parent, nom de la session" '[[ $(sed -n 2p <<< "$T") == *"…/site.fr/src"*"certificat expiré"* ]]' "$(sed -n 2p <<< "$T")"
 verifie "état PM2 de l'app où l'on se trouve" '[[ $(sed -n 3p <<< "$T") == *"pm2 ● en ligne ↺3"* ]]' "$(sed -n 3p <<< "$T")"
 T72=$(COLUMNS=72 rendre "$S/sl/v3-serveur.sh" srv.json | texte | sed -n 3p)
-verifie "à 72 colonnes la ligne 3 tient, en gardant le contexte, le 7 j et le quota Fable" '[ "${#T72}" -le 72 ] && [[ $T72 == *"12%"*"7j"*"41%"*"Fable 14%"* ]]' "$T72"
+verifie "à 72 colonnes la ligne 3 tient, en gardant le contexte, l'usage 5 h, le 7 j et le quota Fable" '[ "${#T72}" -le 72 ] && [[ $T72 == *"12%"*"5h"*"23%"*"7j"*"41%"*"Fable 14%"* ]]' "$T72"
+T50=$(COLUMNS=50 rendre "$S/sl/v3-serveur.sh" srv.json | texte | sed -n 3p)
+verifie "quand la place manque, le quota Fable part avant l'usage 5 h" '[ "${#T50}" -le 50 ] && [[ $T50 == *"12%"*"5h"*"23%"*"7j"*"41%"* && $T50 != *Fable* ]]' "$T50"
 T44=$(COLUMNS=44 rendre "$S/sl/v3-serveur.sh" srv.json | texte | sed -n 3p)
 verifie "à 44 colonnes il reste le contexte et le quota 7 j" '[ "${#T44}" -le 44 ] && [[ $T44 == *"12%"*"7j"*"41%"* ]]' "$T44"
 verifie "l'environnement des apps (secrets de pm2 jlist) n'est écrit nulle part" '! grep -rq "SECRET-DE-L-APP" "$CACHE" "$S/out/srv.txt"'
@@ -515,7 +517,21 @@ L0=$(STATUSLINE_OPERATOR=$'alice\033[31m;rm' rendre "$S/sl/v3-serveur.sh" srv.js
 verifie "nom de compte invalide : ignoré" '[[ $L0 != *alice* ]]' "$L0"
 jq -c 'del(.rate_limits)' "$S/out/srv.json" > "$S/out/srv-debut.json"
 T=$(rendre "$S/sl/v3-serveur.sh" srv-debut.json | texte | sed -n 3p)
-verifie "avant que Claude Code transmette les quotas : le 7 j et le quota Fable viennent de l'API" '[[ $T == *" │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% "*" │ Fable 14%"* ]]' "$T"
+verifie "avant que Claude Code transmette les quotas : l'usage 5 h, le 7 j et le quota Fable viennent de l'API" '[[ $T == *" │ 5h ▰▰▱▱▱▱▱▱▱▱ 23% "*" │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% "*" │ Fable 14%"* ]]' "$T"
+# Usage 5 h : seulement pour un compte qui a une fenêtre de 5 h en cours.
+jq -c 'del(.rate_limits.five_hour)' "$S/out/srv.json" > "$S/out/srv-sans-5h.json"
+T=$(rendre "$S/sl/v3-serveur.sh" srv-sans-5h.json | texte | sed -n 3p)
+verifie "compte sans fenêtre de 5 h : pas de segment 5 h, même si le cache du profil en garde une" '[[ $T == "█░░░░░░░░░░░░░░ 12% │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% 5j "*" │ Fable 14% │ pm2 ● en ligne ↺3" ]]' "$T"
+jq -c '.rate_limits.five_hour.resets_at = (now - 60 | floor)' "$S/out/srv.json" > "$S/out/srv-5h-echue.json"
+T=$(rendre "$S/sl/v3-serveur.sh" srv-5h-echue.json | texte | sed -n 3p)
+verifie "fenêtre de 5 h échue : le segment disparaît" '[[ $T != *"5h "* && $T == *"7j ▰▰▰▰▱▱▱▱▱▱ 41%"* ]]' "$T"
+jq -c '.rate_limits.five_hour = {used_percentage:100,resets_at:(now + 1500 | floor)}' "$S/out/srv.json" > "$S/out/srv-5h-pleine.json"
+rendre "$S/sl/v3-serveur.sh" srv-5h-pleine.json > "$S/out/srv-5h-pleine.txt"; T=$(texte < "$S/out/srv-5h-pleine.txt" | sed -n 3p)
+verifie "compte bloqué par sa limite de 5 h : 100 % en rouge et temps restant" '[[ $T == *" │ 5h ▰▰▰▰▰▰▰▰▰▰ 100% 0h2"[45]"m │ 7j "* ]] && grep -q $'"'"'\033\[38;5;203m\033\[1m100%'"'"' "$S/out/srv-5h-pleine.txt"' "$T"
+printf '{"five_hour":null,"seven_day":{"utilization":41.2,"resets_at":"%s"},"limits":[{"kind":"weekly_scoped","percent":14,"scope":{"model":{"display_name":"Fable"}}}]}' "$(iso $((MAINTENANT + 172800)) 'Z')" > "$S/out/api-corps"
+perimer usage; T=$(chaud "$S/sl/v3-serveur.sh" srv-debut.json usage | texte | sed -n 3p)
+verifie "avant les quotas de Claude Code, API sans fenêtre de 5 h : pas de segment 5 h" '[[ $T == "█░░░░░░░░░░░░░░ 12% │ 7j ▰▰▰▰▱▱▱▱▱▱ 41% 1j 23h │ Fable 14% │ pm2 ● en ligne ↺3" ]]' "$T"
+api_normale; perimer usage; chaud "$S/sl/v3-serveur.sh" srv-debut.json usage > /dev/null
 printf 'SERVEUR=APP-PROD\nNIVEAU=prod\nCOUTS=1\n' > "$R/etc/claude-statusline.conf"
 T=$(rendre "$S/sl/v3-serveur.sh" srv.json | texte)
 verifie "COUTS=1 rallume les montants en dollars" '[[ $(sed -n 3p <<< "$T") == *"\$0.40"* ]]' "$(sed -n 3p <<< "$T")"

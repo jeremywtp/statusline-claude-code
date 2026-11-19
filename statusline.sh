@@ -1427,10 +1427,13 @@ if { [ "$OPT_QUOTA_API" = 1 ] || [ "$OPT_COSTS" = 1 ]; } && cache_line _us usage
     is_num "$_u7" && BLOCK_COST=$_u7
   fi
 fi
-# Fenêtre 5 h : celle de Claude Code, sinon celle du cache si elle n'est pas échue.
+# Fenêtre 5 h : celle de Claude Code. Celle du cache, si elle n'est pas échue, ne sert que tant
+# que Claude Code n'a transmis aucun quota (début de session, version ancienne) : dès qu'il en
+# transmet, l'absence de fenêtre 5 h veut dire que le compte de la session n'en a pas, même si
+# le cache du profil garde celle d'un autre compte.
 PCT_5H=""; RESET_5H=""
 if [ -n "$RL5_PCT" ] && [ -n "$RL5_RESET" ] && [ "$RL5_RESET" -gt "$NOW" ]; then PCT_5H=$RL5_PCT; RESET_5H=$RL5_RESET
-elif [ -n "$C_P5" ] && [ -n "$C_R5" ] && [ "$C_R5" -gt "$NOW" ]; then PCT_5H=$C_P5; RESET_5H=$C_R5; fi
+elif [ -z "$RL5_PCT$RL7_PCT" ] && [ -n "$C_P5" ] && [ -n "$C_R5" ] && [ "$C_R5" -gt "$NOW" ]; then PCT_5H=$C_P5; RESET_5H=$C_R5; fi
 PCT_7D=${RL7_PCT:-$C_P7}
 # Sur un serveur, aucun quota connu (ni transmis par Claude Code, ni reçu de l'API) : plutôt
 # pas de ligne qu'un « 0 % » qui ne dit rien.
@@ -1503,9 +1506,10 @@ fi
 # Le segment 5h est masque (separateur compris) tant qu'aucune fenetre 5h n'est en cours.
 build_line3() {
   local w=$1 costs=$2 b5 b7 s5="" s7 sf=""
-  # L'usage 5 h n'est pas affiché sur un serveur (décision du 13/11) : le 7 j et le quota Fable
-  # y suffisent.
-  if [ -n "$PCT_5H_INT" ] && [ "$SRV_MODE" != 1 ]; then
+  # Usage 5 h : affiché partout, mais seulement pour un compte qui a une fenêtre de 5 h en
+  # cours. Sur un serveur il avait été retiré ; or un compte peut y être bloqué par cette seule
+  # limite, sans que rien ne le montre. Un compte sans limite de 5 h n'a pas ce segment.
+  if [ -n "$PCT_5H_INT" ]; then
     s5="${WHITE}5h${RST}"
     if [ "$w" -gt 0 ]; then mini_bar b5 "$PCT_5H_INT" "$COLOR_5H" "$w"; s5+=" ${b5}"; fi
     s5+=" ${COLOR_5H}${BOLD}${PCT_5H_INT}%${RST} ${DIM}${CYAN}${TIMER_5H}${RST}"
@@ -1537,20 +1541,23 @@ done
 
 # --- Sur un serveur : contexte, quotas, git et app sur UNE seule ligne ---
 # Trois lignes au lieu de quatre (décision du 13/11) : serveur, modèle et dossier, puis celle-ci.
-# Quand la place manque : la mini-barre du quota raccourcit puis s'efface, la barre de contexte
-# raccourcit, puis les segments partent du moins utile au plus utile (état PM2 quand l'app est
-# en ligne, compte, branche, quota Fable). Le contexte et le quota 7 j restent toujours. Une
-# app à l'arrêt ou en erreur reste affichée jusqu'au bout. Sans quota connu, pas de « 0 % ».
+# Quand la place manque : les mini-barres des quotas raccourcissent puis s'effacent, la barre de
+# contexte raccourcit, puis les segments partent du moins utile au plus utile (état PM2 quand
+# l'app est en ligne, compte, branche, quota Fable, usage 5 h). Le contexte et le quota 7 j
+# restent toujours. Une app à l'arrêt ou en erreur reste affichée jusqu'au bout. Sans quota
+# connu, pas de « 0 % ». L'usage 5 h n'existe que si le compte a une fenêtre de 5 h en cours.
 if [ "$SRV_MODE" = 1 ]; then
   _app_prio=5
   case $APP_SEGMENT in ''|*"en ligne"*) ;; *) _app_prio=1 ;; esac
   for _try in "15 10" "15 5" "10 5" "10 0"; do
     barre_contexte _bar "${_try% *}"
     build_line3 "${_try#* }" "$_costs"
-    _s7=${SEGS[1]}; _sf=${SEGS[2]}; _sa=${SEGS[3]}
+    _s5=${SEGS[0]}; _s7=${SEGS[1]}; _sf=${SEGS[2]}; _sa=${SEGS[3]}
     if [ "$_sans_quota" = 1 ]; then _s7=""; _sf=""; fi
-    SEGS=("$_bar" "$_seg_cost" "$_s7" "$_sf" "$GIT_SEGMENT" "$APP_SEGMENT" "$_sa")
-    PRIOS=(0 6 0 2 3 "$_app_prio" 4)
+    # À priorité égale, le segment le plus à droite part le premier : le quota Fable avant
+    # l'usage 5 h, qui bloque tous les modèles.
+    SEGS=("$_bar" "$_seg_cost" "$_s5" "$_s7" "$_sf" "$GIT_SEGMENT" "$APP_SEGMENT" "$_sa")
+    PRIOS=(0 6 2 0 2 3 "$_app_prio" 4)
     LINE2=""
     for _i in "${!SEGS[@]}"; do
       [ -n "${SEGS[$_i]}" ] || continue
