@@ -56,14 +56,14 @@ Opus 5.5 ▌▌▌▌▌ │ …/apps/mon-site.fr │ v2.1.323 ●
 
 ## Mode serveur
 
-Un fichier `/etc/claude-statusline.conf` (root) fait d'une machine un serveur. La statusline tient alors sur trois lignes : la ligne du serveur en tête, la ligne du modèle avec le dossier courant et son parent (`…/apps/mon-site.fr`), puis une seule ligne qui regroupe le contexte, les quotas, la branche git et l'état PM2 de l'app dans laquelle on se trouve. Quand la place manque sur cette dernière, la mini-barre du quota raccourcit puis s'efface, la barre de contexte raccourcit, puis les segments partent du moins utile au plus utile ; le contexte et le quota 7 j restent toujours.
+Un fichier `/etc/claude-statusline.conf` (root) fait d'une machine un serveur. La statusline tient alors sur trois lignes : la ligne du serveur en tête, la ligne du modèle avec le dossier courant et son parent (`…/apps/mon-site.fr`), puis une seule ligne qui regroupe le contexte, les quotas, la branche git et l'état PM2 de l'app dans laquelle on se trouve. Quand la place manque sur cette dernière, les mini-barres des quotas raccourcissent puis s'effacent, la barre de contexte raccourcit, puis les segments partent du moins utile au plus utile (état PM2 d'une app en ligne, compte, branche, quota Fable, usage 5 h) ; le contexte et le quota 7 j restent toujours.
 
 Sur un serveur elle est **allégée** : ce qui ne sert pas pendant une maintenance n'est pas affiché.
 
 | Sur un serveur | Pourquoi | Réglage |
 |---|---|---|
 | Pas de montants en dollars (session, 5 h, 7 j) | Sur un abonnement, ces montants ne correspondent à aucune facture. Du même coup, aucun JSONL n'est lu | `COUTS=1` pour les afficher |
-| Pas d'usage 5 h | Le quota 7 j et le quota Fable suffisent | — |
+| Usage 5 h **seulement si le compte a une fenêtre de 5 h en cours** | Un compte peut être bloqué par cette seule limite : elle doit se voir. Un compte sans limite de 5 h n'a pas ce segment. Dès que Claude Code transmet les quotas de la session (`rate_limits`), eux seuls font foi : la fenêtre gardée dans le cache du profil, qui peut être celle d'un autre compte, ne sert qu'avant | — |
 | Pas de durée de session | Aucune décision n'en dépend | — |
 | Pas de `git fetch` automatique | Écrit dans `.git`, prend des verrous, utilise les identifiants du serveur | `AUTOFETCH=1` pour l'activer |
 | Quota Fable, version de Claude Code et point de statut : **gardés** | Le quota Fable passe par l'API des quotas (jeton donné à `curl` par son entrée standard), le point de statut par status.claude.com | `QUOTA_API=0` et `STATUT_CLAUDE=0` pour couper ces deux appels |
@@ -435,7 +435,7 @@ Le lookahead 200 chars couvre toutes les descriptions (jusqu'a ~95 chars pour `h
 ## Essais
 
 ```bash
-tests/essais.sh        # 106 essais, dans un dossier temporaire : aucun réseau, aucun vrai jeton
+tests/essais.sh        # 111 essais, dans un dossier temporaire : aucun réseau, aucun vrai jeton
 tests/essais.sh -v     # avec les rendus
 tests/couts-reels.sh   # coûts de la branche main et de la version courante sur vos transcriptions (lecture seule)
 ```
